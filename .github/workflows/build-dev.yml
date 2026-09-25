@@ -54,6 +54,8 @@ jobs:
         run: |
           python scripts/check_strings.py app/src/main
           python scripts/check_deps.py app/src/main/java/com/aliothmoon/maameow || true
+          # Koin 缺失依赖只在运行期暴露，编译通过也照样启动闪退，必须单独校验
+          python scripts/check_koin.py app/src/main
 
       - name: Build Debug APK
         run: ./gradlew clean assembleDebug --stacktrace
