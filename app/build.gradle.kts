@@ -1,88 +1,39 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
+    // ⚠️ 不要加 kotlin.android：AGP 9.0+ 已内置 Kotlin 支持，
+    //    重复应用会导致构建直接失败
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.kotlin.parcelize)
-    alias(libs.plugins.ksp)
-    id("com.aliothmoon.maameow.i18n-verify")
 }
 
 val localProperties = Properties().apply {
-    val localPropertiesFile = rootProject.file("local.properties")
-    if (localPropertiesFile.exists()) {
-        load(localPropertiesFile.inputStream())
-    }
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
-
-val gitVersionCode: Int by lazy {
-    providers.exec {
-        commandLine("git", "rev-list", "--count", "HEAD")
-    }.standardOutput.asText.get().trim().toInt()
-}
-
-val gitVersionName: String by lazy {
-    val desc = providers.exec {
-        commandLine("git", "describe", "--tags", "--always")
-        isIgnoreExitValue = true
-    }.standardOutput.asText.get().trim()
-    val match =
-        Regex("""^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.]+))?(?:-(\d+)-g[0-9a-f]+)?$""").matchEntire(
-            desc
-        )
-    if (match != null) {
-        val (major, minor, patch, pre, distance) = match.destructured
-        when {
-            distance.isEmpty() && pre.isEmpty() -> "$major.$minor.$patch"
-            distance.isEmpty() -> "$major.$minor.$patch-$pre"
-            else -> "$major.$minor.${patch.toInt() + 1}-alpha.$distance"
-        }
-    } else {
-        desc.removePrefix("v").ifEmpty { "0.0.0-dev" }
-    }
-}
-
-// 本机默认只编 arm64；CI=true 保持双 ABI
-// -Pmaa.abi=all|arm64-v8a|x86_64 或 local.properties 覆盖
-val ci = System.getenv("CI")?.equals("true", ignoreCase = true) == true
-val abiRaw = (findProperty("maa.abi") as String?)?.trim().orEmpty()
-    .ifEmpty { localProperties.getProperty("maa.abi", "").trim() }
-    .ifEmpty { if (ci) "all" else "arm64-v8a" }
-val nativeAbis: List<String> = if (abiRaw.equals("all", ignoreCase = true)) {
-    listOf("arm64-v8a", "x86_64")
-} else {
-    abiRaw.split(',', ' ').map(String::trim).filter(String::isNotEmpty)
-}
-println("[ABI] ${nativeAbis.joinToString()}")
-println("[Java Version] ${System.getProperty("java.version")}")
 
 android {
-    namespace = "com.aliothmoon.maameow"
+    namespace = "com.feishu.checkin"
     compileSdk = 37
-
 
     defaultConfig {
         applicationId = "com.feishu.checkin"
         minSdk = 28
         targetSdk = 36
-        versionCode = gitVersionCode
-        versionName = gitVersionName
-        println("Build version: versionCode=$versionCode, versionName=$versionName")
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 1
+        versionName = "1.0.0"
 
-        // 无 native 代码（MaaCore 已剥离），仅保留 arm64 作为默认 ABI 声明
-        ndk {
-            abiFilters.addAll(nativeAbis)
-        }
+        // 飞书官方包名，供无障碍服务过滤与拉起使用
+        buildConfigField("String", "FEISHU_PACKAGE", "\"com.ss.android.lark\"")
+        // 飞书极速版（部分企业用这个）
+        buildConfigField("String", "FEISHU_PACKAGE_LITE", "\"com.larksuite.suite\"")
     }
 
     signingConfigs {
         create("release") {
-            // KEYSTORE_PATH 统一按「仓库根相对路径」理解（如 release.jks）。
-            // 这里必须用 rootProject.file()：直接用 file() 会以 app 模块为基准，
-            // 传 "release.jks" 会被解析成 app/release.jks，两个基准混用极易踩坑。
+            // KEYSTORE_PATH 按「仓库根相对路径」理解（如 keystore/release.jks）。
+            // 必须用 rootProject.file()：直接用 file() 会以 app 模块为基准。
             val keystorePath = System.getenv("KEYSTORE_PATH")
                 ?: localProperties.getProperty("KEYSTORE_PATH", "")
             if (keystorePath.isNotEmpty()) {
@@ -98,143 +49,96 @@ android {
     }
 
     buildTypes {
-        val minifyProguardFiles = listOf(
-            getDefaultProguardFile("proguard-android-optimize.txt").absolutePath,
-            "proguard-rules.pro",
-        )
-        // local.properties: maa.debugR8=true 时 debug 也走 R8
-        val debugR8 = localProperties.getProperty("maa.debugR8", "false").toBoolean()
-        getByName("debug") {
-            isMinifyEnabled = debugR8
-            isShrinkResources = debugR8
-            if (debugR8) {
-                proguardFiles(*minifyProguardFiles.toTypedArray())
-                println("[R8] debug minify+shrink enabled (maa.debugR8=true)")
-            }
+        debug {
+            applicationIdSuffix = ".debug"
+            isMinifyEnabled = false
         }
         release {
-            // 排障开关：MAA_NO_R8=true 时产出「不混淆的 Release 包」。
-            // 用途：怀疑崩溃是 R8 裁剪/改名引起时，用它做 A/B 对照 ——
-            // 关掉 R8 能跑、开着 R8 闪退，即可锁定为混淆问题。
+            // 排障开关：MAA_NO_R8=true 时产出不混淆的 release 包，用于 A/B 对照
             val noR8 = System.getenv("MAA_NO_R8")?.toBoolean() == true
             isMinifyEnabled = !noR8
             isShrinkResources = !noR8
             if (noR8) {
                 println("[R8] MAA_NO_R8=true —— release 关闭 minify/shrink（排障用）")
             } else {
-                proguardFiles(*minifyProguardFiles.toTypedArray())
+                proguardFiles(
+                    getDefaultProguardFile("proguard-android-optimize.txt"),
+                    "proguard-rules.pro",
+                )
             }
             val keystorePath = System.getenv("KEYSTORE_PATH")
                 ?: localProperties.getProperty("KEYSTORE_PATH", "")
             if (keystorePath.isNotEmpty()) {
                 signingConfig = signingConfigs.getByName("release")
-                println("[Signing] Using release keystore: $keystorePath")
+                println("[Signing] Using keystore: $keystorePath")
             } else {
-                println("[Signing] No release keystore configured, release build will not be signed")
+                println("[Signing] No keystore configured — release 将产出未签名包")
             }
         }
     }
-
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    kotlin {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
+
     buildFeatures {
-        buildConfig = true
-        aidl = true
         compose = true
+        buildConfig = true
     }
 
     packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
         resources {
-            pickFirsts += setOf(
-                "META-INF/LICENSE.md",
-                "META-INF/NOTICE.md"
-            )
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/LICENSE*"
+            excludes += "/META-INF/NOTICE*"
         }
     }
 
-    androidResources {
-        @Suppress("UnstableApiUsage")
-        localeFilters += listOf("zh", "en")
-    }
-}
-
-kotlin {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
+    lint {
+        abortOnError = false
     }
 }
 
 dependencies {
-    compileOnly(project(":hidden-api"))
-    implementation(project(":annotation-api"))
-    ksp(project(":ksp-processor"))
-
+    // AndroidX
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    implementation(libs.androidx.lifecycle.process)
-    implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    implementation(libs.androidx.exifinterface)
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)
-    implementation(libs.androidx.material.icons.core)
-    implementation(libs.androidx.material.icons.extended)
-    implementation(libs.androidx.navigation.compose)
-    implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.window)
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.core.splashscreen)
 
-    // Koin
+    // Compose
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.graphics)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.material.icons.extended)
+    implementation(libs.androidx.navigation.compose)
+    debugImplementation(libs.androidx.compose.ui.tooling)
+
+    // DI
     implementation(libs.koin.android)
     implementation(libs.koin.androidx.compose)
 
-    // Third-party
-    implementation(libs.jna) { artifact { type = "aar" } }
-    implementation(libs.fastjson2)
-    implementation(libs.shizuku.api)
-    implementation(libs.shizuku.provider)
-    implementation(libs.libsu)
-    implementation(libs.device.compat)
-    implementation(libs.xx.permissions)
-    implementation(libs.floatingx)
-    implementation(libs.sonner)
+    // 存储
+    implementation(libs.androidx.datastore.preferences)
+
+    // 日志 / 序列化
     implementation(libs.timber)
-    implementation(libs.okhttp)
-    implementation(libs.angus.mail)
-    implementation(libs.angus.activation)
-    implementation(libs.jakarta.activation.api)
-    implementation(libs.reorderable)
-    implementation(libs.compose.markdown)
-
-    // sora-editor：JSON 语法高亮编辑器（TextMate + darcula 主题）
-    implementation(platform(libs.bom))
-    implementation(libs.editor)
-    implementation(libs.editor.language.textmate)
-
-    // Kotlin Serialization
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.xzakota.focus.api)
 
+    // 测试
     testImplementation(libs.junit)
-    testImplementation(libs.mockk)
     testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.koin.test)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.ui.test.junit4)
-    debugImplementation(libs.androidx.ui.tooling)
-    debugImplementation(libs.androidx.ui.test.manifest)
 }
