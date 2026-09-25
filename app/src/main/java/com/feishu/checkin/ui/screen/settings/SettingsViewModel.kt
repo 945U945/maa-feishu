@@ -8,8 +8,10 @@ import com.feishu.checkin.checkin.alarm.AlarmScheduler
 import com.feishu.checkin.checkin.data.CheckInPlanRepository
 import com.feishu.checkin.checkin.data.SettingsRepository
 import com.feishu.checkin.checkin.model.CheckInPlan
+import com.feishu.checkin.checkin.model.EntryFormats
 import com.feishu.checkin.core.device.HealthStatus
 import com.feishu.checkin.core.device.PermissionChecker
+import com.feishu.checkin.core.shizuku.ShizukuSupport
 import com.feishu.checkin.core.time.AppSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +32,33 @@ data class SettingsUiState(
     val plans: List<CheckInPlan> = emptyList(),
     val health: List<HealthStatus> = emptyList(),
     val appVersion: String = "",
+    /**
+     * Shizuku 运行时描述。
+     *
+     * 空串表示不可用。放在 state 里而不是让 UI 自己去查，
+     * 是因为查询要走 binder（有开销），且结果在同一屏里不需要变化 ——
+     * 归入 state 后 UI 层完全不必知道 Shizuku 的存在。
+     */
+    val shizukuStatus: String = "",
 )
+
+/**
+ * 入口链接的校验结果。
+ *
+ * 单独做成类型而不是返回 Boolean，因为「填错了」需要**告诉用户错在哪** ——
+ * 链接这东西最容易犯的错是「复制成了飞书分享链接」或
+ * 「复制成了企业自定义域名的网页链接」，两者的提示完全不同。
+ */
+sealed interface EntryUrlCheck {
+    /** 空 —— 未配置，合法状态（会退回点击导航） */
+    data object Empty : EntryUrlCheck
+
+    /** 格式合法 */
+    data object Valid : EntryUrlCheck
+
+    /** 格式不合法，附原因 */
+    data class Invalid(val reason: String) : EntryUrlCheck
+}
 
 /**
  * 设置页 ViewModel。
@@ -52,6 +80,7 @@ class SettingsViewModel(
             plans = plans,
             health = permissionChecker.checkAll(),
             appVersion = appVersionName(),
+            shizukuStatus = shizukuStatus(),
         )
     }.stateIn(
         scope = viewModelScope,
@@ -83,6 +112,77 @@ class SettingsViewModel(
         viewModelScope.launch { settingsRepository.setVerboseLog(enabled) }
     }
 
+    // ────────────────────── 打卡入口链接 ──────────────────────
+
+    /**
+     * 保存用户配置的打卡入口链接。
+     *
+     * ## 为什么先校验再保存
+     *
+     * 把明显不合法的链接存进去，用户会在**打卡失败之后**才发现 ——
+     * 而那时错误发生在自动化流程里，用户看到的只是
+     * 「入口链接打不开」，根本不知道自己什么时候填错了。
+     *
+     * 在这里拦下来，用户立刻知道「这条链接不对」。
+     * 注意校验是**宽松**的（只认协议头与宿主，不校验路径），
+     * 因为不同企业的 AppLink 路径差异很大，严校验会把合法链接挡在门外。
+     *
+     * @return 校验结果，供 UI 提示
+     */
+    fun setEntryUrl(url: String): EntryUrlCheck {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) {
+            // 空是合法状态：表示「不用深链，退回点击导航」
+            viewModelScope.launch { settingsRepository.setEntryUrl("") }
+            return EntryUrlCheck.Empty
+        }
+
+        if (!EntryFormats.looksLikeFeishuLink(trimmed)) {
+            return EntryUrlCheck.Invalid(
+                "这看起来不是飞书应用链接。请确认复制的是「考勤打卡」应用的链接" +
+                    "（长按应用 → 分享 → 复制链接）",
+            )
+        }
+
+        return EntryUrlCheck.Valid.also {
+            viewModelScope.launch {
+                settingsRepository.setEntryUrl(trimmed)
+                Timber.i("已保存打卡入口链接（长度 %d）", trimmed.length)
+            }
+        }
+    }
+
+    /**
+     * 从剪贴板读链接。
+     *
+     * 这是**主要输入方式** —— 用户实际是「在飞书复制 → 切回本应用」，
+     * 手动长按粘贴比点一下「读取剪贴板」麻烦得多。
+     *
+     * 注意 Android 10+ 对后台应用读剪贴板有限制，但本方法
+     * 由前台界面按钮触发，此时应用在前台，读取是允许的。
+     */
+    fun pasteEntryUrlFromClipboard(): String? = runCatching {
+        val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE)
+            as? android.content.ClipboardManager ?: return null
+        clipboard.primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.coerceToText(appContext)
+            ?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    }.onFailure { Timber.w(it, "读取剪贴板失败") }.getOrNull()
+
+    /** 深链总开关 */
+    fun setDeepLinkEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setDeepLinkEnabled(enabled) }
+    }
+
+    /** 桌面快捷方式开关 */
+    fun setShortcutEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setShortcutEnabled(enabled) }
+    }
+
     /** 重新扫描自定义方案文件 */
     fun reloadPlans() {
         viewModelScope.launch {
@@ -108,6 +208,17 @@ class SettingsViewModel(
             .versionName
             .orEmpty()
     }.getOrDefault("")
+
+    /**
+     * Shizuku 运行时描述，不可用时返回空串。
+     *
+     * 刻意**不区分**「没装 Shizuku」与「装了没启动」的文案差异 ——
+     * 对用户来说这两种情况的行动是一样的（都用不了），
+     * 分两句话只会增加认知负担。真正需要细节时看日志。
+     */
+    private fun shizukuStatus(): String = runCatching {
+        ShizukuSupport.describeRuntime(appContext.packageManager)
+    }.getOrDefault("")
 }
 
 /**
@@ -126,6 +237,82 @@ class ProbeViewModel : ViewModel() {
 
     private val _inFeishu = MutableStateFlow(false)
     val inFeishu: StateFlow<Boolean> = _inFeishu.asStateFlow()
+
+    // ────────────────────── Shizuku 结构探测 ──────────────────────
+
+    /**
+     * Shizuku 结构探测结果。
+     *
+     * 与上面的「控件树采集」是**互补**的两件事：
+     * - 控件树（无障碍）看的是「界面长什么样」，用来写方案选择器
+     * - 结构探测（Shizuku）看的是「飞书有哪些 Activity、注册了哪些
+     *   scheme」，用来判断深链该怎么配
+     *
+     * 用户当初选的「先探测飞书 Activity 结构」指的就是这一项。
+     */
+    private val _probeReport = MutableStateFlow("")
+    val probeReport: StateFlow<String> = _probeReport.asStateFlow()
+
+    private val _probing = MutableStateFlow(false)
+    val probing: StateFlow<Boolean> = _probing.asStateFlow()
+
+    /** Shizuku 不可用时的原因说明，供 UI 提示 */
+    private val _probeUnavailable = MutableStateFlow<String?>(null)
+    val probeUnavailable: StateFlow<String?> = _probeUnavailable.asStateFlow()
+
+    /**
+     * 用 Shizuku 探测飞书结构。
+     *
+     * 输出的是「按报告组织的可读文本」而不是原始 dumpsys ——
+     * 原始输出动辄几 MB，用户根本读不了。
+     * 需要原始数据时可以导出日志文件（那里保留了全文）。
+     */
+    fun probeFeishuStructure(context: android.content.Context, packageName: String) {
+        if (_probing.value) return
+        _probing.value = true
+        _probeUnavailable.value = null
+
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val pm = context.packageManager
+                    if (!ShizukuSupport.isAvailable(pm)) {
+                        return@withContext ProbeOutcome(
+                            unavailable = if (ShizukuSupport.isInstalled(pm)) {
+                                "Shizuku 已安装但未运行，请先在 Shizuku 应用里启动服务"
+                            } else {
+                                "未检测到 Shizuku。这一项探测是可选的 —— 不装也能用打卡功能"
+                            },
+                            text = "",
+                        )
+                    }
+
+                    val probe = runCatching {
+                        com.feishu.checkin.core.shizuku.FeishuEntryProbe(
+                            com.feishu.checkin.core.shizuku.ShizukuShell(),
+                        ).probe(packageName)
+                    }.getOrElse { t ->
+                        Timber.w(t, "结构探测失败")
+                        return@withContext ProbeOutcome(
+                            unavailable = "探测失败：${t.message ?: t.javaClass.simpleName}",
+                            text = "",
+                        )
+                    }
+
+                    ProbeOutcome(unavailable = null, text = probe.toReadableText())
+                }
+                _probeUnavailable.value = result.unavailable
+                _probeReport.value = result.text
+            } catch (t: Throwable) {
+                Timber.e(t, "结构探测异常")
+                _probeUnavailable.value = "探测异常：${t.message ?: t.javaClass.simpleName}"
+            } finally {
+                _probing.value = false
+            }
+        }
+    }
+
+    private data class ProbeOutcome(val unavailable: String?, val text: String)
 
     /**
      * 采集当前界面。
@@ -167,6 +354,11 @@ class ProbeViewModel : ViewModel() {
     fun clear() {
         _tree.value = ""
         _inFeishu.value = false
+    }
+
+    fun clearProbe() {
+        _probeReport.value = ""
+        _probeUnavailable.value = null
     }
 
     private data class CaptureResult(val ok: Boolean, val tree: String, val inFeishu: Boolean)

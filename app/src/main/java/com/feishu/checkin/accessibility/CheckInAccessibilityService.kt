@@ -233,6 +233,24 @@ class CheckInAccessibilityService : AccessibilityService() {
         return null
     }
 
+    /**
+     * 取当前界面全部可见文本，拼成一段字符串。
+     *
+     * 用于**落点校验**：深链跳转后需要判断「到底落在哪个页面」，
+     * 而页面特征就藏在文案里（考勤页有「上班打卡」「下班打卡」）。
+     *
+     * 与 [containsAnyText] 的区别：那个是「有没有命中关键字」的判定，
+     * 这个是「把全部文案交出去」—— 因为落点校验还要把
+     * 「界面长什么样」记录下来供诊断使用，只看命中与否信息不够。
+     *
+     * 用换行拼接而不是空格：便于日志里肉眼阅读，
+     * 也让 `contains` 匹配不会因跨文本边界产生假命中。
+     */
+    fun dumpPageText(): String {
+        val root = rootNode() ?: return ""
+        return collectTexts(root).joinToString("\n")
+    }
+
     private fun collectTexts(root: AccessibilityNodeInfo): List<String> {
         val out = mutableListOf<String>()
         val queue = ArrayDeque<AccessibilityNodeInfo>()

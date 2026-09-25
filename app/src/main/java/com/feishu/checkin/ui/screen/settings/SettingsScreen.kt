@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +22,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -85,6 +87,18 @@ fun SettingsScreen(
                 plans = state.plans,
                 selectedId = state.settings.planId,
                 onSelect = viewModel::setPlan,
+            )
+
+            // 入口链接放在方案之后、高级之前 ——
+            // 从「改动频率」看它和方案同级（飞书改版/换企业都要重配），
+            // 从「重要性」看它是新方案的核心开关，不能埋进高级里
+            EntrySection(
+                settings = state.settings,
+                shizukuStatus = state.shizukuStatus,
+                onSaveUrl = viewModel::setEntryUrl,
+                onPaste = viewModel::pasteEntryUrlFromClipboard,
+                onDeepLinkToggle = viewModel::setDeepLinkEnabled,
+                onShortcutToggle = viewModel::setShortcutEnabled,
             )
 
             AdvancedSection(
@@ -160,6 +174,211 @@ private fun PlanSection(
             }
         }
     }
+}
+
+/**
+ * 打卡入口配置。
+ *
+ * ## 交互设计的核心判断
+ *
+ * 用户在飞书复制链接后切回本应用，**期望一步就能贴上** ——
+ * 所以「从剪贴板粘贴」是主按钮，且点击后立即保存并给出反馈，
+ * 不给用户「还要再点保存」的二次负担。
+ *
+ * 链接本身的展示做了截断（只显示前后各一段），因为
+ * AppLink 动辄上百字符，整条显示会挤满屏幕且完全不可读 ——
+ * 用户其实并不需要看清整条链接，只需要知道「配了一条」就好。
+ */
+@Composable
+private fun EntrySection(
+    settings: AppSettings,
+    shizukuStatus: String,
+    onSaveUrl: (String) -> EntryUrlCheck,
+    onPaste: () -> String?,
+    onDeepLinkToggle: (Boolean) -> Unit,
+    onShortcutToggle: (Boolean) -> Unit,
+) {
+    // 编辑态：false 表示「未在编辑」，显示只读摘要
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(settings.entryUrl) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    val invalidTemplate = stringResource(R.string.settings_entry_url_invalid)
+    val savedText = stringResource(R.string.settings_entry_url_saved)
+    val clipboardEmpty = stringResource(R.string.settings_entry_clipboard_empty)
+
+    /**
+     * 保存并整理提示。
+     *
+     * 抽成局部函数是因为有三个调用点（粘贴、保存、清除），
+     * 三处都要做「按校验结果设提示」这件事 —— 复制三遍必然走样。
+     */
+    fun commit(url: String, thenExitEdit: Boolean) {
+        when (val check = onSaveUrl(url)) {
+            is EntryUrlCheck.Valid -> {
+                if (thenExitEdit) editing = false
+                message = savedText
+            }
+            is EntryUrlCheck.Invalid ->
+                message = invalidTemplate.format(check.reason)
+            EntryUrlCheck.Empty -> {
+                if (thenExitEdit) editing = false
+                message = savedText
+            }
+        }
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.settings_entry),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = stringResource(R.string.settings_entry_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // ── 当前链接（只读摘要 或 编辑框） ──
+            if (editing) {
+                OutlinedTextField(
+                    value = draft,
+                    onValueChange = { draft = it; message = null },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.settings_entry_url)) },
+                    placeholder = { Text("https://applink.feishu.cn/...") },
+                    minLines = 2,
+                    maxLines = 4,
+                )
+            } else {
+                Text(
+                    text = settings.entryUrl.ifBlank {
+                        stringResource(R.string.settings_entry_url_empty)
+                    }.let(::abbreviate),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (settings.entryUrl.isBlank()) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── 操作按钮 ──
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = {
+                    // 主路径：从剪贴板读取并立即保存
+                    val text = onPaste()
+                    if (text.isNullOrBlank()) {
+                        message = clipboardEmpty
+                    } else {
+                        draft = text
+                        commit(text, thenExitEdit = true)
+                    }
+                }) {
+                    Text(stringResource(R.string.settings_entry_url_paste))
+                }
+
+                TextButton(onClick = {
+                    if (editing) {
+                        commit(draft, thenExitEdit = true)
+                    } else {
+                        draft = settings.entryUrl
+                        editing = true
+                        message = null
+                    }
+                }) {
+                    Text(
+                        if (editing) {
+                            stringResource(R.string.common_save)
+                        } else {
+                            stringResource(R.string.common_confirm)
+                        },
+                    )
+                }
+
+                if (settings.entryUrl.isNotBlank()) {
+                    TextButton(onClick = {
+                        draft = ""
+                        commit("", thenExitEdit = true)
+                    }) {
+                        Text(stringResource(R.string.settings_entry_url_clear))
+                    }
+                }
+            }
+
+            message?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── 获取方式说明（折叠在按钮里，不占常驻空间） ──
+            Text(
+                text = stringResource(R.string.settings_entry_url_how_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+
+            SwitchRow(
+                title = stringResource(R.string.settings_entry_deeplink),
+                desc = stringResource(R.string.settings_entry_deeplink_desc),
+                checked = settings.deepLinkEnabled,
+                onCheckedChange = onDeepLinkToggle,
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            SwitchRow(
+                title = stringResource(R.string.settings_entry_shortcut),
+                desc = stringResource(R.string.settings_entry_shortcut_desc),
+                checked = settings.shortcutEnabled,
+                onCheckedChange = onShortcutToggle,
+            )
+
+            // ── Shizuku 状态（可选增强，只展示不要求） ──
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = if (shizukuStatus.isBlank()) {
+                    stringResource(R.string.settings_entry_shizuku_off)
+                } else {
+                    stringResource(R.string.settings_entry_shizuku_on, shizukuStatus)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 截断长链接用于展示。
+ *
+ * 保留头尾各 28 个字符 —— 头能看出是哪个域名（feishu 还是 larksuite），
+ * 尾能看出路径特征，中间省略。这比「显示前 40 个字符」有用得多：
+ * 长链接的前半段往往是完全相同的 `https://applink.feishu.cn/client/`。
+ */
+private fun abbreviate(url: String, keep: Int = 28): String {
+    if (url.length <= keep * 2 + 3) return url
+    return url.take(keep) + "…" + url.takeLast(keep)
 }
 
 /** 高级设置 */
@@ -374,12 +593,19 @@ fun ProbeScreen(
     val tree by viewModel.tree.collectAsStateWithLifecycle()
     val capturing by viewModel.capturing.collectAsStateWithLifecycle()
     val inFeishu by viewModel.inFeishu.collectAsStateWithLifecycle()
+    val probeReport by viewModel.probeReport.collectAsStateWithLifecycle()
+    val probing by viewModel.probing.collectAsStateWithLifecycle()
+    val probeUnavailable by viewModel.probeUnavailable.collectAsStateWithLifecycle()
+    // 探测需要一个 Context 取 PackageManager —— 用 Application Context，
+    // 因为 Shizuku 可用性是进程级的，与具体 Activity 无关
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     // LocalClipboardManager 已废弃（Compose 新版本会移除），
     // 改用 LocalClipboard。差别是新的 setClipEntry 是挂起函数，
     // 因此需要一个 scope 来调用 —— 复制这种瞬时操作正好适合
     val clipboard = androidx.compose.ui.platform.LocalClipboard.current
     val clipboardScope = rememberCoroutineScope()
     var copied by remember { mutableStateOf(false) }
+    var probeCopied by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -397,6 +623,7 @@ fun ProbeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         ) {
             Text(
@@ -466,7 +693,9 @@ fun ProbeScreen(
                 )
             } else {
                 Card(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant,
                     ),
@@ -481,6 +710,106 @@ fun ProbeScreen(
                     )
                 }
             }
+
+            // ────────────────────── Shizuku 结构探测 ──────────────────────
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = stringResource(R.string.probe_structure),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = stringResource(R.string.probe_structure_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Button(
+                    onClick = {
+                        viewModel.probeFeishuStructure(
+                            context,
+                            com.feishu.checkin.BuildConfig.FEISHU_PACKAGE,
+                        )
+                    },
+                    enabled = !probing,
+                ) {
+                    Text(
+                        stringResource(
+                            if (probing) {
+                                R.string.probe_structure_running
+                            } else {
+                                R.string.probe_structure_run
+                            },
+                        ),
+                    )
+                }
+                if (probeReport.isNotEmpty()) {
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = {
+                            clipboardScope.launch {
+                                clipboard.setClipEntry(
+                                    android.content.ClipData
+                                        .newPlainText("probe", probeReport)
+                                        .let { androidx.compose.ui.platform.ClipEntry(it) },
+                                )
+                            }
+                            probeCopied = true
+                        },
+                    ) {
+                        Text(
+                            stringResource(
+                                if (probeCopied) R.string.probe_copied else R.string.probe_copy,
+                            ),
+                        )
+                    }
+                }
+            }
+
+            probeUnavailable?.let { reason ->
+                Spacer(Modifier.height(8.dp))
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ) {
+                    Text(
+                        text = reason,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(12.dp),
+                    )
+                }
+            }
+
+            if (probeReport.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 400.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ) {
+                    Text(
+                        text = probeReport,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .verticalScroll(rememberScrollState()),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 }

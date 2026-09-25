@@ -23,6 +23,15 @@ class AppPaths(private val context: Context) {
     /** 崩溃日志 */
     val crashDir: File by lazy { File(root, "crash_logs").ensure() }
 
+    /**
+     * 入口探测结果。
+     *
+     * 存放「飞书 Activity 结构探测」的产物。
+     * 单独一个目录而不是塞进 logs —— 这是**用户需要阅读并导出**的内容，
+     * 与滚动的运行日志性质不同，混在一起会被日志淹没。
+     */
+    val probeDir: File by lazy { File(root, "probes").ensure() }
+
     /** 临时文件（导出中转） */
     val tempDir: File by lazy { File(context.cacheDir, "temp").ensure() }
 

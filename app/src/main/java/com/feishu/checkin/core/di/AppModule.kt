@@ -14,6 +14,8 @@ import com.feishu.checkin.core.device.AwakeController
 import com.feishu.checkin.core.device.DeviceStateProvider
 import com.feishu.checkin.core.device.PermissionChecker
 import com.feishu.checkin.core.log.AppPaths
+import com.feishu.checkin.core.shizuku.FeishuEntryProbe
+import com.feishu.checkin.core.shizuku.ShizukuShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -130,6 +132,100 @@ val coreModule: Module = module {
 
     /** 拉起飞书 */
     single { AppLauncher(androidContext()) }
+
+    /**
+     * Shizuku 命令执行器（可选增强）。
+     *
+     * ## 为什么以 lambda 形式提供
+     *
+     * 上层（[DeepLinkLauncher] / [LandingVerifier]）需要的是
+     * 「跑一条命令拿输出」这个能力，而不是 [ShizukuShell] 对象本身。
+     * 用 lambda 注入有两个好处：
+     *
+     * 1. **Shizuku 不可用时自动降级**：这里的 lambda 内部会先检查
+     *    可用性，不可用直接返回 null —— 上层代码一行都不用改，
+     *    也不需要到处写 `if (shizukuAvailable)`。
+     * 2. **测试可替换**：单测里注入一个假 lambda 就能模拟
+     *    Shizuku 的各种返回，不必装 Shizuku、不必真机。
+     *
+     * 注意这个 single **永远不会抛异常** —— Shizuku 不可用时返回 null。
+     * 这是「可选增强，不强制依赖」这条要求在类型上的落实。
+     */
+    single<((List<String>) -> String?)> {
+        val shell = com.feishu.checkin.core.shizuku.ShizukuShell()
+        val pm = androidContext().packageManager
+        { command: List<String> ->
+            if (!com.feishu.checkin.core.shizuku.ShizukuSupport.isAvailable(pm)) {
+                null
+            } else {
+                val result = shell.exec(command)
+                // 把 stderr 一并交出去：am start 的失败信息几乎都在 stderr
+                buildString {
+                    if (result.stdout.isNotBlank()) append(result.stdout)
+                    if (result.stderr.isNotBlank()) {
+                        if (isNotEmpty()) append('\n')
+                        append(result.stderr)
+                    }
+                }.ifBlank { null }
+            }
+        }
+    }
+
+    /**
+     * 深链启动器。
+     *
+     * 以 [com.feishu.checkin.core.device.DeepLinkSender] 接口注册 ——
+     * 引擎只依赖接口，于是「换成别的发送实现」不需要改引擎。
+     *
+     * 第三参数是上一行注册的 Shizuku 执行器 ——
+     * Shizuku 不可用时它是 null，启动器自动改走应用侧 Intent。
+     */
+    single<com.feishu.checkin.core.device.DeepLinkSender> {
+        com.feishu.checkin.core.device.DeepLinkLauncher(androidContext(), get())
+    }
+
+    /**
+     * Shizuku 命令执行器。
+     *
+     * 注册成单例是因为它本身无状态，只是 `Shizuku.newProcess`
+     * 的薄封装 —— 每次 new 一个没有意义，反而让「有几次调用」
+     * 这件事难以从日志里看出来。
+     */
+    single { ShizukuShell() }
+
+    /**
+     * 飞书 Activity 结构探测器。
+     *
+     * 供设置页的「探测飞书结构」功能使用 —— 用户可以用它
+     * 导出飞书的 Activity 清单与考勤相关组件，据此判断
+     * 深链应该配成什么样。这是「让用户不必猜」的落地方式。
+     */
+    single { FeishuEntryProbe(get()) }
+
+    /**
+     * 落点校验器。
+     *
+     * 传入的 lambda 用于读当前前台 Activity 完整类名 ——
+     * 这是 Shizuku 在本项目里**最有价值的一项能力**：
+     * `dumpsys activity activities` 给出的类名不会骗人，
+     * 比靠界面文案猜落点可靠一个量级。
+     *
+     * Shizuku 不可用时这个 lambda 返回 null，
+     * [LandingVerifier] 自然退回「只看界面文案」的单证据判定。
+     */
+    single {
+        val pm = androidContext().packageManager
+        val probe = get<FeishuEntryProbe>()
+        com.feishu.checkin.core.device.LandingVerifier(
+            foregroundReader = {
+                if (com.feishu.checkin.core.shizuku.ShizukuSupport.isAvailable(pm)) {
+                    probe.currentForegroundActivity()
+                } else {
+                    null
+                }
+            },
+        )
+    }
 }
 
 /**
@@ -160,6 +256,11 @@ val checkinModule: Module = module {
                 com.feishu.checkin.accessibility.AccessibilitySupport
                     .isEnabled(androidContext())
             },
+            // 深链启动器与落点校验器。两者都不为 null ——
+            // 内部会各自处理「Shizuku 不可用」的情况（降级到 Intent / 文案判定），
+            // 所以这里不需要判空，细节都封在各自类里
+            deepLinkLauncher = get(),
+            landingVerifier = get(),
         )
     }
 }

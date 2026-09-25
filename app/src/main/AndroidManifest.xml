@@ -27,6 +27,23 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!--
+      Shizuku 授权声明。
+      这是第三方应用使用 Shizuku 能力的**必需声明** —— 没有它，
+      Shizuku.checkSelfPermission() 永远返回拒绝，且不会有任何提示。
+      注意这不会让应用获得权限，用户仍需在 Shizuku 里手动授权。
+    -->
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+
+    <!--
+      读取桌面快捷方式。
+      飞书支持把工作台应用（含打卡）添加到桌面，点图标即直达该应用。
+      这是我们希望利用的入口之一，但查询快捷方式需要这个权限。
+    -->
+    <uses-permission
+        android:name="com.android.launcher.permission.INSTALL_SHORTCUT"
+        tools:ignore="ProtectedPermissions" />
+
+    <!--
       查询飞书包名。
       Android 11+ 的包可见性限制会导致 getLaunchIntentForPackage 返回 null，
       必须显式声明要交互的包。
@@ -34,9 +51,39 @@
     <queries>
         <package android:name="com.ss.android.lark" />
         <package android:name="com.larksuite.suite" />
+        <!-- Shizuku：需要查询它是否安装 -->
+        <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="moe.shizuku.privileged.api.dev" />
+
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+
+        <!--
+          深链跳转需要系统能解析出飞书。
+          不声明的话 resolveActivity 会返回 null，导致我们误判为
+          「没有应用能打开这个链接」而放弃跳转。
+        -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" android:host="applink.feishu.cn" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" android:host="applink.larksuite.com" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <data android:scheme="feishu" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <data android:scheme="lark" />
         </intent>
     </queries>
 

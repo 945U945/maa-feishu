@@ -27,6 +27,21 @@ enum class CheckInResult {
     /** 未在飞书中找到打卡入口（通常是方案配置过时） */
     ENTRY_NOT_FOUND,
 
+    /**
+     * 深链跳转后落点不是考勤页。
+     *
+     * 与 [ENTRY_NOT_FOUND] 分开是因为**排查方向完全不同**：
+     * 前者要去看「怎么点进去」，这里要看「链接本身对不对」。
+     * 混在一起会让用户拿着错误的排查方向去改方案，越改越远。
+     *
+     * 常见成因：链接指向的是飞书首页而非考勤应用、
+     * 链接在当前企业下无权限、链接已随应用改版失效。
+     */
+    DEEPLINK_LANDING_MISMATCH,
+
+    /** 深链本身无法被系统处理（格式错误 / 飞书未安装 / 无 Activity 接收） */
+    DEEPLINK_UNRESOLVED,
+
     /** 网络异常 */
     NETWORK_ERROR,
 
@@ -49,6 +64,8 @@ enum class CheckInResult {
      */
     val isFailure: Boolean
         get() = this == ENTRY_NOT_FOUND ||
+            this == DEEPLINK_LANDING_MISMATCH ||
+            this == DEEPLINK_UNRESOLVED ||
             this == NETWORK_ERROR ||
             this == DEVICE_LOCKED ||
             this == PERMISSION_MISSING ||
@@ -66,12 +83,18 @@ enum class CheckInResult {
      * - **值得重试**：[FAILURE]（结果确认超时，可能只是网络慢）、
      *   [NETWORK_ERROR]（网络抖动，等一下可能就好了）
      * - **不值得重试**：[ENTRY_NOT_FOUND]（方案失效，重试还是找不到）、
+     *   [DEEPLINK_LANDING_MISMATCH]（链接本身就不对，重试落点还是一样）、
+     *   [DEEPLINK_UNRESOLVED]（链接格式或接收方问题，重试无意义）、
      *   [DEVICE_LOCKED]（解锁不了，重试还是解锁不了）、
      *   [PERMISSION_MISSING]（要用户去开权限，重试毫无意义）、
      *   [ALREADY_DONE] 与 [SKIPPED_BUSY]（正常终态）
      *
      * 这条规则的价值在于：对确定性失败重试只会让用户多等几十秒，
      * 并把日志弄脏，反而掩盖真实问题。
+     *
+     * 特别注意深链的两个失败**不重试** —— 它们是配置性问题，
+     * 重试 3 次只是把同一个错误重复 3 遍，用户需要的是被明确告知
+     * 「链接不对，请重新复制」，而不是等待。
      */
     val isRetryable: Boolean
         get() = this == FAILURE || this == NETWORK_ERROR
@@ -104,7 +127,13 @@ enum class CheckInPhase {
     /** 等待飞书界面就绪 */
     LAUNCHING,
 
-    /** 导航到考勤页 */
+    /** 通过深链或快捷方式直达考勤页 */
+    OPENING_ENTRY,
+
+    /** 校验落点是否为考勤页 */
+    VERIFYING_LANDING,
+
+    /** 导航到考勤页（传统点击路径） */
     NAVIGATING,
 
     /** 点击打卡按钮 */

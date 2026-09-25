@@ -26,6 +26,27 @@ data class CheckInPlan(
     val successKeywords: List<String> = emptyList(),
     /** 内置方案不允许删除 */
     val builtIn: Boolean = false,
+
+    /**
+     * 入口定位策略。
+     *
+     * 决定按什么顺序尝试「如何进入考勤页」。
+     * 默认 [EntryStrategy.AUTO] —— 深链优先，失败退回点击导航。
+     */
+    val entryStrategy: EntryStrategy = EntryStrategy.AUTO,
+
+    /**
+     * 落点校验关键字：跳转后界面上**应当**出现这些文案，
+     * 才认定「确实落在考勤页」。
+     *
+     * 这是深链方案的安全阀。只发一条链接就宣布成功是不负责任的 ——
+     * 链接可能过期、可能被企业策略拦截、可能落到飞书首页。
+     * 用界面文案反证落点，才能把「跳过去了」和「跳对地方了」分开。
+     *
+     * 注意与 [alreadyDoneKeywords] 的区别：那些是"已完成"的证据，
+     * 这些是"到对地方了"的证据，两者都要看。
+     */
+    val landingKeywords: List<String> = emptyList(),
 )
 
 /**

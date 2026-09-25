@@ -603,6 +603,8 @@ private fun resultLabel(result: CheckInResult?): String = when (result) {
     CheckInResult.NETWORK_ERROR -> stringResource(R.string.result_failed_network)
     CheckInResult.DEVICE_LOCKED -> stringResource(R.string.result_failed_locked)
     CheckInResult.PERMISSION_MISSING -> stringResource(R.string.result_failed_permission)
+    CheckInResult.DEEPLINK_LANDING_MISMATCH -> stringResource(R.string.result_failed_deeplink_landing)
+    CheckInResult.DEEPLINK_UNRESOLVED -> stringResource(R.string.result_failed_deeplink_unresolved)
     CheckInResult.SKIPPED_BUSY -> stringResource(R.string.result_skipped_busy)
     CheckInResult.FAILURE -> stringResource(R.string.result_failed_unknown)
     null -> stringResource(R.string.result_running)

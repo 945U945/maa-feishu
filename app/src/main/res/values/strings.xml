@@ -38,6 +38,8 @@
     <string name="result_failed_locked">设备锁定，无法解锁</string>
     <string name="result_failed_permission">缺少必要权限</string>
     <string name="result_failed_unknown">打卡失败</string>
+    <string name="result_failed_deeplink_landing">没跳到打卡页，请检查入口链接</string>
+    <string name="result_failed_deeplink_unresolved">入口链接打不开</string>
     <string name="result_running">正在打卡…</string>
     <string name="result_skipped_busy">已有打卡任务在执行</string>
 
@@ -78,6 +80,25 @@
     <string name="settings_probe">控件探针</string>
     <string name="settings_probe_desc">导出当前飞书界面的控件结构，用于自定义方案</string>
 
+    <!-- 打卡入口（深链） -->
+    <string name="settings_entry">打卡入口</string>
+    <string name="settings_entry_desc">在飞书里长按「考勤打卡」→ 分享 → 复制链接，粘到这里。配置后可直接跳转到考勤页，不必再在工作台里逐层查找。</string>
+    <string name="settings_entry_url">入口链接</string>
+    <string name="settings_entry_url_empty">未配置（将在工作台里逐层查找）</string>
+    <string name="settings_entry_url_paste">从剪贴板粘贴</string>
+    <string name="settings_entry_url_clear">清除</string>
+    <string name="settings_entry_url_how">如何获取链接？</string>
+    <string name="settings_entry_url_how_desc">打开飞书 → 工作台 → 长按「考勤打卡」图标 → 分享 → 复制链接</string>
+    <string name="settings_entry_url_invalid">%1$s</string>
+    <string name="settings_entry_url_saved">已保存入口链接</string>
+    <string name="settings_entry_clipboard_empty">剪贴板里没有文字</string>
+    <string name="settings_entry_deeplink">启用深链跳转</string>
+    <string name="settings_entry_deeplink_desc">用链接直接打开考勤页（关闭则退回点击导航）</string>
+    <string name="settings_entry_shortcut">尝试桌面快捷方式</string>
+    <string name="settings_entry_shortcut_desc">深链失败时，尝试通过桌面快捷方式进入</string>
+    <string name="settings_entry_shizuku_on">Shizuku 可用：%1$s</string>
+    <string name="settings_entry_shizuku_off">Shizuku 未运行（可选，开启后落点判定更准）</string>
+
     <!-- 控件探针 -->
     <string name="probe_title">控件探针</string>
     <string name="probe_hint">请先切到飞书的目标界面，再回到这里点击采集</string>
@@ -87,6 +108,11 @@
     <string name="probe_copied">已复制</string>
     <string name="probe_empty">尚未采集</string>
     <string name="probe_not_in_feishu">当前不在飞书界面</string>
+    <string name="probe_structure">飞书结构探测（需 Shizuku）</string>
+    <string name="probe_structure_desc">读取飞书的 Activity 清单与链接注册情况，用于判断打卡入口链接该怎么配</string>
+    <string name="probe_structure_run">开始探测</string>
+    <string name="probe_structure_running">探测中…</string>
+    <string name="probe_structure_clear">清除</string>
 
     <!-- 通用 -->
     <string name="common_confirm">确定</string>

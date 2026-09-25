@@ -29,6 +29,23 @@ import com.feishu.checkin.checkin.model.SwipeDirection
  */
 object BuiltInPlans {
 
+    /**
+     * 默认落点校验关键字。
+     *
+     * 深链跳转后，界面上出现其中任一文案才认定「确实落在考勤页」。
+     *
+     * 之所以选这几条：它们**只在考勤页出现**且**各版本都保留**。
+     * 反而「考勤」二字不能用 —— 飞书的考勤规则说明页、
+     * 考勤设置页、审批流里都有「考勤」，用它会导致误判
+     * （把设置页当成考勤页，然后在上面找打卡按钮，必然失败）。
+     */
+    val ATTENDANCE_LANDING_KEYWORDS: List<String> = listOf(
+        "上班打卡",
+        "下班打卡",
+        "外勤打卡",
+        "更新打卡",
+    )
+
     /** 标准版：工作台 → 考勤打卡 */
     val WORKBENCH = CheckInPlan(
         id = "builtin_workbench",
@@ -98,6 +115,11 @@ object BuiltInPlans {
             "签到成功",
             "已打卡",
         ),
+        // 落点校验关键字：深链跳转后必须看到这些文案，才认定「确实在考勤页」。
+        // 取「打卡」二字是因为它是考勤页上最稳定、最不可替代的标志 ——
+        // 「考勤」可能出现在别的地方（比如考勤规则说明页），
+        // 而「上班打卡/下班打卡」按钮只在考勤页有
+        landingKeywords = ATTENDANCE_LANDING_KEYWORDS,
         builtIn = true,
     )
 
@@ -138,6 +160,7 @@ object BuiltInPlans {
         ),
         alreadyDoneKeywords = listOf("已打卡", "已签到", "更新打卡", "打卡成功", "今日已打卡"),
         successKeywords = listOf("打卡成功", "打卡完成", "签到成功", "已打卡"),
+        landingKeywords = ATTENDANCE_LANDING_KEYWORDS,
         builtIn = true,
     )
 
@@ -182,6 +205,7 @@ object BuiltInPlans {
         ),
         alreadyDoneKeywords = listOf("已打卡", "已签到", "更新打卡", "打卡成功", "今日已打卡"),
         successKeywords = listOf("打卡成功", "打卡完成", "签到成功", "已打卡"),
+        landingKeywords = ATTENDANCE_LANDING_KEYWORDS,
         builtIn = true,
     )
 

@@ -38,6 +38,8 @@
     <string name="result_failed_locked">Device locked, cannot unlock</string>
     <string name="result_failed_permission">Missing required permission</string>
     <string name="result_failed_unknown">Check-in failed</string>
+    <string name="result_failed_deeplink_landing">Did not land on the check-in page; verify the entry link</string>
+    <string name="result_failed_deeplink_unresolved">Entry link could not be opened</string>
     <string name="result_running">Checking in…</string>
     <string name="result_skipped_busy">A check-in task is already running</string>
 
@@ -78,6 +80,25 @@
     <string name="settings_probe">View inspector</string>
     <string name="settings_probe_desc">Dump the current Feishu view tree to build custom plans</string>
 
+    <!-- Check-in entry (deep link) -->
+    <string name="settings_entry">Check-in entry</string>
+    <string name="settings_entry_desc">In Feishu, long-press the Attendance app → Share → Copy link, then paste it here. Once configured, the app jumps straight to the attendance page instead of hunting through the Workbench.</string>
+    <string name="settings_entry_url">Entry link</string>
+    <string name="settings_entry_url_empty">Not configured (will navigate the Workbench)</string>
+    <string name="settings_entry_url_paste">Paste from clipboard</string>
+    <string name="settings_entry_url_clear">Clear</string>
+    <string name="settings_entry_url_how">How do I get the link?</string>
+    <string name="settings_entry_url_how_desc">Open Feishu → Workbench → long-press the Attendance icon → Share → Copy link</string>
+    <string name="settings_entry_url_invalid">%1$s</string>
+    <string name="settings_entry_url_saved">Entry link saved</string>
+    <string name="settings_entry_clipboard_empty">No text in the clipboard</string>
+    <string name="settings_entry_deeplink">Enable deep link</string>
+    <string name="settings_entry_deeplink_desc">Open the attendance page via link (disable to fall back to tap navigation)</string>
+    <string name="settings_entry_shortcut">Try desktop shortcut</string>
+    <string name="settings_entry_shortcut_desc">If the link fails, try entering via a desktop shortcut</string>
+    <string name="settings_entry_shizuku_on">Shizuku available: %1$s</string>
+    <string name="settings_entry_shizuku_off">Shizuku not running (optional; improves landing detection)</string>
+
     <!-- View inspector -->
     <string name="probe_title">View inspector</string>
     <string name="probe_hint">Switch to the target Feishu screen first, then come back and capture</string>
@@ -87,6 +108,11 @@
     <string name="probe_copied">Copied</string>
     <string name="probe_empty">Nothing captured yet</string>
     <string name="probe_not_in_feishu">Not currently in Feishu</string>
+    <string name="probe_structure">Feishu structure probe (needs Shizuku)</string>
+    <string name="probe_structure_desc">Read Feishu\'s activity list and link registrations to determine how the entry link should be configured</string>
+    <string name="probe_structure_run">Run probe</string>
+    <string name="probe_structure_running">Probing…</string>
+    <string name="probe_structure_clear">Clear</string>
 
     <!-- Common -->
     <string name="common_confirm">OK</string>

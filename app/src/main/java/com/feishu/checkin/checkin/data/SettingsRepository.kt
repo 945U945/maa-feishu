@@ -119,6 +119,26 @@ class SettingsRepository(
      */
     suspend fun setKnownZoneId(zoneId: String) = edit { it[Keys.KNOWN_ZONE] = zoneId }
 
+    /**
+     * 保存打卡入口深链。
+     *
+     * 这里**不做格式校验就写入** —— 校验放在 UI 层做并给出提示。
+     * 原因：用户可能粘贴到的是自己企业的定制域名，格式超出我们的
+     * 白名单，但实际可用。在这里硬拦会让合法链接存不进去。
+     * UI 提示"这个链接看起来不太对"是建议，写入是用户的决定。
+     */
+    suspend fun setEntryUrl(url: String) = edit { it[Keys.ENTRY_URL] = url.trim() }
+
+    /** 深链跳转开关 */
+    suspend fun setDeepLinkEnabled(enabled: Boolean) = edit {
+        it[Keys.DEEP_LINK_ENABLED] = enabled
+    }
+
+    /** 桌面快捷方式尝试开关 */
+    suspend fun setShortcutEnabled(enabled: Boolean) = edit {
+        it[Keys.SHORTCUT_ENABLED] = enabled
+    }
+
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         runCatching { context.settingsDataStore.edit(block) }
             .onFailure { Timber.e(it, "写入设置失败") }
@@ -136,6 +156,9 @@ class SettingsRepository(
         val STEP_TIMEOUT_MS = longPreferencesKey("step_timeout_ms")
         val VERBOSE_LOG = booleanPreferencesKey("verbose_log")
         val KNOWN_ZONE = stringPreferencesKey("known_zone")
+        val ENTRY_URL = stringPreferencesKey("entry_url")
+        val DEEP_LINK_ENABLED = booleanPreferencesKey("deep_link_enabled")
+        val SHORTCUT_ENABLED = booleanPreferencesKey("shortcut_enabled")
     }
 
     private companion object {
@@ -167,6 +190,11 @@ class SettingsRepository(
             stepTimeoutMs = this[Keys.STEP_TIMEOUT_MS] ?: AppSettings.DEFAULT.stepTimeoutMs,
             verboseLog = this[Keys.VERBOSE_LOG] ?: AppSettings.DEFAULT.verboseLog,
             knownZoneId = this[Keys.KNOWN_ZONE] ?: ZoneId.systemDefault().id,
+            entryUrl = this[Keys.ENTRY_URL] ?: AppSettings.DEFAULT.entryUrl,
+            deepLinkEnabled = this[Keys.DEEP_LINK_ENABLED]
+                ?: AppSettings.DEFAULT.deepLinkEnabled,
+            shortcutEnabled = this[Keys.SHORTCUT_ENABLED]
+                ?: AppSettings.DEFAULT.shortcutEnabled,
         )
     }
 }

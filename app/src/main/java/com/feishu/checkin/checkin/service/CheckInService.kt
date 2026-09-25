@@ -270,6 +270,8 @@ class CheckInService : Service() {
         CheckInResult.NETWORK_ERROR -> getString(R.string.result_failed_network)
         CheckInResult.DEVICE_LOCKED -> getString(R.string.result_failed_locked)
         CheckInResult.PERMISSION_MISSING -> getString(R.string.result_failed_permission)
+        CheckInResult.DEEPLINK_LANDING_MISMATCH -> getString(R.string.result_failed_deeplink_landing)
+        CheckInResult.DEEPLINK_UNRESOLVED -> getString(R.string.result_failed_deeplink_unresolved)
         CheckInResult.SKIPPED_BUSY -> getString(R.string.result_skipped_busy)
         CheckInResult.FAILURE -> getString(R.string.result_failed_unknown)
     }

@@ -445,6 +445,8 @@ private fun resultLabel(result: CheckInResult?): String = when (result) {
     CheckInResult.NETWORK_ERROR -> stringResource(R.string.result_failed_network)
     CheckInResult.DEVICE_LOCKED -> stringResource(R.string.result_failed_locked)
     CheckInResult.PERMISSION_MISSING -> stringResource(R.string.result_failed_permission)
+    CheckInResult.DEEPLINK_LANDING_MISMATCH -> stringResource(R.string.result_failed_deeplink_landing)
+    CheckInResult.DEEPLINK_UNRESOLVED -> stringResource(R.string.result_failed_deeplink_unresolved)
     CheckInResult.SKIPPED_BUSY -> stringResource(R.string.result_skipped_busy)
     CheckInResult.FAILURE -> stringResource(R.string.result_failed_unknown)
     null -> stringResource(R.string.result_running)
@@ -459,6 +461,8 @@ private fun kindLabel(kind: CheckInKind): String = when (kind) {
 private fun phaseLabel(phase: CheckInPhase): String = when (phase) {
     CheckInPhase.PREPARING -> "准备"
     CheckInPhase.LAUNCHING -> "启动飞书"
+    CheckInPhase.OPENING_ENTRY -> "打开入口"
+    CheckInPhase.VERIFYING_LANDING -> "校验落点"
     CheckInPhase.NAVIGATING -> "导航"
     CheckInPhase.CHECKING_IN -> "点击打卡"
     CheckInPhase.VERIFYING -> "确认结果"
