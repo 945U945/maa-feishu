@@ -54,20 +54,23 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      # 签名文件以 base64 存在 secret 里，构建前还原到 KEYSTORE_PATH 指定的位置。
+      # 签名文件以 base64 存在 secret 里，构建前还原出来。
       # 未配置 KEYSTORE_BASE64 时跳过，构建会降级为未签名包（不可直接安装）。
       # 注意：GitHub Actions 的 if 条件里不能直接引用 secrets.*，只能经 env 中转。
+      #
+      # 路径必须落在 app 模块内：build.gradle.kts 用的是 file(keystorePath)，
+      # 而 file() 在 app 模块作用域下以 app/ 为基准，写根目录会报
+      # "Keystore file '.../app/release.jks' not found"。
       - name: Restore keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "未配置 KEYSTORE_BASE64，跳过还原，release 将产出未签名包"
             exit 0
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
-          echo "已还原签名文件到 $KEYSTORE_PATH"
+          echo "$KEYSTORE_BASE64" | base64 -d > app/release.jks
+          echo "已还原签名文件到 app/release.jks"
 
       - name: Static self-check
         run: |
