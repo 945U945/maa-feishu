@@ -170,13 +170,23 @@ com/feishu/checkin/
 
 ### 静态自检
 
-两个脚本能在几秒内捕获「编译通过但运行时炸」的问题：
+几个脚本能在几秒内捕获「编译通过但运行时炸」的问题，
+CI 里按「越快越靠前」的顺序执行：
 
 ```bash
-python scripts/check_koin.py       # 依赖注入完整性
-python scripts/check_strings.py    # 多语言字符串一致性
-python scripts/check_comment_balance.py   # Kotlin 块注释配对（见下）
+python scripts/check_eol.py .              # 关键文件行尾（必须最先，见下）
+python scripts/check_koin.py               # 依赖注入完整性
+python scripts/check_comment_balance.py app/src   # Kotlin 块注释配对
+python scripts/check_strings.py            # 多语言字符串一致性
 ```
+
+> **行尾检查为什么排第一**：若 `gradlew` 带 CRLF，shebang 会变成
+> `#!/usr/bin/env sh\r`，Linux 上找不到该解释器 →
+> `exit 127`，且日志里**一行 Gradle 输出都没有**，极易误诊为构建配置问题。
+> 用 `check_eol.py` 提前拦住，报错点与根因就在同一处。
+>
+> 注意：**不要用 `grep -c $'\r'` 判断行尾** —— Git Bash 的 grep 会做
+> 文本模式转换，把纯 LF 文件也报成含 CR。必须数字节，脚本里已处理。
 
 ### 仓库维护脚本
 
@@ -198,6 +208,49 @@ python scripts/ci_status.py --log <run_id>
 > 后者只有「新增 + 更新」语义，没有删除。
 > 在推倒重写的场景下会把旧代码留在远端，CI 就会 checkout 到
 > 一棵新旧混合的树，报出大量指向错误方向的错误。
+
+---
+
+## CI 流水线
+
+| 流水线 | 触发 | 产物 |
+|---|---|---|
+| `build-dev.yml` | push 到 main / PR / 手动 | Debug APK（artifact，保留 14 天） |
+| `build-release.yml` | 打 tag `v*` / 手动 | 签名 Release APK → **挂到 GitHub Release 页** |
+
+### 已跑通的状态
+
+- Dev Build **#90 ✓**（四个静态检查 + 单测 + 编译 + APK 结构校验全过）
+- Release Build **#8 ✓**（手动触发）/ **#9 ✓**（tag `v1.0.0` 触发，含 `Create Release`）
+- 挂包：`https://github.com/945U945/maa-feishu/releases/tag/v1.0.0`
+  （`app-release.apk`，6.78 MB，v2 签名）
+
+### 发版流程
+
+```bash
+# 1. 推送代码
+python scripts/sync_to_github.py
+
+# 2. 把 tag 指向当前 HEAD（若 tag 已存在需 PATCH 强制更新）
+#    POST  /git/refs        {"ref":"refs/tags/v1.0.0","sha":"<head>"}
+#    PATCH /git/refs/tags/v1.0.0  {"sha":"<head>","force":true}
+
+# 3. tag push 自动触发 Release 构建，跑完自动创建 Release 页并挂包
+```
+
+### 两个必须知道的 CI 环境约定
+
+1. **SDK platform 目录名是 `android-37.0`，不是 `android-37`。**
+   从 API 36 起 Google 给 platform 目录加了小版本号。
+   判断「是否已安装」必须用通配 `android-37*`，
+   写死 `android-37` 会导致「装好了却报安装失败」——
+   报错信息与真实状态完全相反。
+   （`compileSdk = 37` 不受影响，AGP 内部会映射到 `android-37.0`）
+
+2. **不用 `android-actions/setup-android`。**
+   它内部执行 `sdkmanager "tools"`，而 `tools` 包已从 Google 仓库移除，
+   job 会在这一步直接挂掉。`ubuntu-latest` runner 自带 Android SDK，
+   手工配置环境变量即可。
 
 ---
 
