@@ -3,7 +3,7 @@ package com.aliothmoon.maameow.data.checkin
 import android.content.Context
 import com.aliothmoon.maameow.domain.checkin.BuiltInProfiles
 import com.aliothmoon.maameow.domain.checkin.CheckInAction
-import com.aliothmoon.maameow.domain.checkin.CheckInEngine
+import com.aliothmoon.maameow.domain.checkin.CheckInMode
 import com.aliothmoon.maameow.domain.checkin.CheckInProfile
 import com.aliothmoon.maameow.domain.checkin.CheckInRule
 import com.aliothmoon.maameow.domain.checkin.ImageTemplate
