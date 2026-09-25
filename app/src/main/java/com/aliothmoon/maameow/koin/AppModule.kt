@@ -7,6 +7,7 @@ import com.aliothmoon.maameow.data.api.ETagCacheManager
 import com.aliothmoon.maameow.data.api.HttpClientHelper
 import com.aliothmoon.maameow.data.checkin.BackgroundImageStore
 import com.aliothmoon.maameow.data.checkin.CheckInRepository
+import com.aliothmoon.maameow.data.config.AppPathConfig
 import com.aliothmoon.maameow.data.log.ApplicationLogWriter
 import com.aliothmoon.maameow.data.notification.NotificationSettingsManager
 import com.aliothmoon.maameow.data.notification.live.AospPromotedDetector
@@ -40,6 +41,7 @@ import com.aliothmoon.maameow.domain.notification.LiveSessionCoordinator
 import com.aliothmoon.maameow.domain.notification.LiveUpdatePublisher
 import com.aliothmoon.maameow.domain.service.ExternalNotificationService
 import com.aliothmoon.maameow.domain.service.LogExportService
+import com.aliothmoon.maameow.domain.service.MaaSessionLogger
 import com.aliothmoon.maameow.domain.service.ScreenSaverController
 import com.aliothmoon.maameow.domain.service.TaskEndRegistry
 import com.aliothmoon.maameow.domain.service.UnlockGestureReader
@@ -84,6 +86,14 @@ import kotlin.time.Duration.Companion.seconds
  */
 val appModule = module {
 
+    // ── 路径与日志基础（其余一切日志/崩溃/导出都建立在它之上） ──
+    //
+    // 注意：AppPathConfig 与 MaaSessionLogger 必须注册，且在启动同步段
+    // （MaaApplication.onCreate 里的 treeHolder.setup() / crashHandler.init()）
+    // 就会被解析。曾因二者缺失导致应用启动即 NoDefinitionFoundException 闪退。
+    single { AppPathConfig(androidContext()) }
+    single { MaaSessionLogger(get()) }
+
     singleOf(::CrashHandler)
     single {
         OkHttpClient.Builder()
@@ -98,7 +108,9 @@ val appModule = module {
     singleOf(::PermissionManager)
     singleOf(::MainTabNavigator)
 
-    single { AppSettingsManager(androidContext(), get()) }
+    // 用单参次构造函数：primary 需要 CoroutineScope，而工程内只注册了
+    // named("launchPipeline") 的限定版本，无限定符的 CoroutineScope 解析不到。
+    single { AppSettingsManager(androidContext()) }
     // 显式声明接口类型，不用 `bind` 扩展 —— 后者对 lambda 返回值的类型推断
     // 在 Kotlin 2.x + Koin 4.2 组合下不稳定，会报 receiver type mismatch。
     single<UnlockGestureReader> { UnlockGestureStore(get()) }
