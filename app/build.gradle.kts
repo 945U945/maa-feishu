@@ -77,6 +77,33 @@ android {
         }
     }
 
+    // 单元测试配置。
+    //
+    // ## 关于「让 release 变体也跑单测」（走过的弯路）
+    //
+    // 最初的设想是开启 :app:testReleaseUnitTest，好在 R8 混淆后的产物上测，
+    // 以捕获「混淆导致反射失效」这类只在 release 出现的问题。
+    // 实测这条路走不通，原因是 API 层面的：
+    //
+    //   - `enableUnitTest` 属性不在 `VariantBuilder` 上，
+    //     而在 `HasUnitTestBuilder` 接口上
+    //   - 该接口**只存在于 gradle-api-9.2.1.jar**，
+    //     不在构建脚本 classpath 的 gradle-9.2.1.jar 里
+    //   - 结果是无论怎么强制类型转换，Kotlin DSL 都报
+    //     `Unresolved reference 'enableUnitTest'`
+    //     （甚至先说 "Check for instance is always 'true'" 再报未解析，很迷惑）
+    //
+    // 既然如此，CI 改跑 :app:testDebugUnitTest —— 它存在、且当前全绿。
+    // 放弃 release 变体单测的损失很小：
+    //   - 单测覆盖的是纯 JVM 逻辑（时间计算、结果语义），本来就不涉及混淆
+    //   - R8 的真实风险由 proguard-rules.pro 的 keep 规则 + 真机验证来兜
+    // 为了一个「锦上添花」的测试任务去塞 buildscript 依赖，不划算。
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -106,6 +133,15 @@ android {
         abortOnError = false
     }
 }
+
+// ── 无意开启 release 变体的单元测试 ──
+//
+// 曾经尝试在这里用 androidComponents { beforeVariants { ... } }
+// 打开 release 的 unitTest 变体，让 CI 能跑 :app:testReleaseUnitTest。
+// 实测失败，原因见 android { testOptions } 上方的注释：
+// `enableUnitTest` 所属的 `HasUnitTestBuilder` 接口不在构建脚本 classpath 上。
+//
+// CI 因此改用 :app:testDebugUnitTest。
 
 dependencies {
     // AndroidX
