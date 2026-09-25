@@ -154,6 +154,12 @@ jobs:
         run: chmod +x ./gradlew
 
       # ── 静态检查（与 dev 流水线一致，release 前必须通过）──
+
+      # 行尾检查必须最前：gradlew 若是 CRLF，后面所有 ./gradlew 调用
+      # 都会 exit 127，且日志中没有任何 Gradle 输出，极易误诊。
+      - name: Static check — 关键文件行尾
+        run: python3 scripts/check_eol.py .
+
       - name: Static check — Koin 依赖完整性
         run: python3 scripts/check_koin.py
 

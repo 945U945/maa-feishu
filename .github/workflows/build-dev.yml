@@ -137,10 +137,19 @@ jobs:
 
       # ── 静态检查：秒级完成，放在编译之前 ──
       #
-      # 这两项检查直接对应历史上的两次翻车：
-      #   check_koin.py    → 依赖漏注册导致启动闪退
-      #   check_strings.py → 多语言 key 缺失/占位符不一致导致崩溃
+      # 这几项检查直接对应历史上的几次翻车：
+      #   check_eol.py            → gradlew 带 CRLF，shebang 失效 → exit 127
+      #   check_koin.py           → 依赖漏注册导致启动闪退
+      #   check_comment_balance.py→ 注释嵌套导致整文件解析失败
+      #   check_strings.py        → 多语言 key 缺失/占位符不一致导致崩溃
       # 它们能捕获「编译通过但运行时炸」的问题，而编译器抓不到
+
+      # 行尾检查必须放在最前面：gradlew 若是 CRLF，
+      # 后面所有 ./gradlew 调用都会以 exit 127 失败，
+      # 而日志里**看不到任何 Gradle 输出**，极易误诊为构建配置问题。
+      - name: Static check — 关键文件行尾
+        run: |
+          python3 scripts/check_eol.py .
 
       - name: Static check — Koin 依赖完整性
         run: |
