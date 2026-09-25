@@ -144,8 +144,8 @@ object RemoteServiceManager {
         pathConfig: AppPathConfig,
     ) {
         // App 进程写的落 App 目录，launcher 以 shell 身份写的落 core 目录
-        val coreDebugDir = File(pathConfig.coreDebugDir)
-        ServiceBootLogger.init(File(pathConfig.debugDir))
+        val coreDebugDir = pathConfig.coreDebugDir
+        ServiceBootLogger.init(pathConfig.debugDir)
         ShizukuManager.initSui(context.packageName)
         RemoteAccessCoordinator.initialize(appSettings)
         RootRemoteServiceConnector.initialize(context, coreDebugDir)

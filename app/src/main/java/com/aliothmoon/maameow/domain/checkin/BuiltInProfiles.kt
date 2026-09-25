@@ -19,7 +19,7 @@ object BuiltInProfiles {
         id = "builtin_feishu",
         name = "飞书考勤打卡",
         targetPackage = "com.ss.android.lark",
-        engine = CheckInEngine.ACCESSIBILITY,
+        engine = CheckInMode.ACCESSIBILITY,
         // 打开飞书后需要较长加载时间：启动页 + 首页渲染
         launchDelayMs = 3_000L,
         rules = listOf(

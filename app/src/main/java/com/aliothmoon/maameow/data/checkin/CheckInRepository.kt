@@ -198,7 +198,7 @@ class CheckInRepository(
             id = id,
             name = name,
             targetPackage = targetPackage,
-            engine = runCatching { CheckInEngine.valueOf(engine) }.getOrDefault(CheckInEngine.ACCESSIBILITY),
+            engine = runCatching { CheckInMode.valueOf(engine) }.getOrDefault(CheckInMode.ACCESSIBILITY),
             rules = rules.map { it.toDomain() },
             successRules = successRules.map { it.toDomain() },
             successKeywords = successKeywords,

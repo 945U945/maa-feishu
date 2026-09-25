@@ -512,10 +512,10 @@ fun ScheduleEditView(
                             )
                         }
                     }
-                    // 显示选中 Profile 的已启用任务摘要
+                    // 显示选中 Profile 的已启用规则摘要
                     val selectedProfile = state.profiles.find { it.id == state.selectedProfileId }
-                    val enabledTasks = selectedProfile?.chain
-                        ?.filter { it.enabled }
+                    val enabledTasks = selectedProfile?.rules
+                        ?.filter { !it.optional }
                         ?.joinToString("、") { it.name }
                     if (!enabledTasks.isNullOrEmpty()) {
                         Text(

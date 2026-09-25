@@ -1937,6 +1937,9 @@ MAA 不会因为取消勾选此选项而提前在局内结束探索</string>
     <string name="schedule_health_overlay_desc">已启用的屏保策略需要悬浮窗权限</string>
     <!-- 触发日志：失败结果修复入口 -->
     <string name="schedule_backend_fix_still_not_ready">%1$s仍未授权：请确认对应服务正在运行，或在设置中更换启动模式</string>
+    <!-- Shizuku / Root 授权引导弹窗 -->
+    <string name="backend_fix_dialog_title">需要完成授权</string>
+    <string name="backend_fix_dialog_message">打卡需要「%1$s」权限才能定时唤醒设备并解锁屏幕。请按提示完成授权；若已授权仍失败，请确认对应服务正在运行。</string>
     <string name="schedule_time_picker_title">选择时间</string>
     <string name="time_picker_am">AM</string>
     <string name="time_picker_pm">PM</string>

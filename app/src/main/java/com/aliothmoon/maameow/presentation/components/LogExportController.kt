@@ -57,10 +57,21 @@ fun LogExportController(
             return@rememberLauncherForActivityResult
         }
         coroutineScope.launch {
-            val name = logExportService.exportToUri(uri)
+            // 先打包到应用私有目录，再拷贝到用户选定的位置
+            val zip = logExportService.exportZip()
+            val saved = if (zip != null) {
+                runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        zip.inputStream().use { it.copyTo(out) }
+                    }
+                    zip.name
+                }.getOrNull()
+            } else {
+                null
+            }
             isExporting = false
-            toastMessage = if (name != null) {
-                saveSuccessTemplate.format(name)
+            toastMessage = if (saved != null) {
+                saveSuccessTemplate.format(saved)
             } else {
                 failedText
             }
@@ -83,9 +94,10 @@ fun LogExportController(
             if (isExporting) return@LogExportBottomSheet
             isExporting = true
             coroutineScope.launch {
-                val intent = logExportService.exportAllLogs()
+                val zip = logExportService.exportZip()
                 isExporting = false
-                if (intent != null) {
+                if (zip != null) {
+                    val intent = logExportService.buildShareIntent(zip)
                     context.startActivity(Intent.createChooser(intent, chooserTitle))
                 } else {
                     toastMessage = failedText

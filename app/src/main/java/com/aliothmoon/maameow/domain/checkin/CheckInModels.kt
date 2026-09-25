@@ -1,7 +1,7 @@
 package com.aliothmoon.maameow.domain.checkin
 
 /**
- * 打卡识别引擎类型。
+ * 打卡识别方式。
  *
  * 之所以做成双引擎，是因为不同 App 的可访问性差异很大：
  * - [ACCESSIBILITY]：通过无障碍服务读取控件树，按文字/ID/坐标定位。
@@ -9,8 +9,11 @@ package com.aliothmoon.maameow.domain.checkin
  *   因为系统截图会得到全黑图片，图像匹配无从谈起。
  * - [IMAGE_TEMPLATE]：截图 + 模板匹配。适用于没有防截屏的应用，
  *   作为无障碍方案失效时的兜底手段。
+ *
+ * 注意：枚举名是 CheckInMode，而执行引擎的类名是 [CheckInEngine]，
+ * 二者刻意区分，避免同名导致 `valueOf` 无法解析。
  */
-enum class CheckInEngine {
+enum class CheckInMode {
     /** 无障碍控件定位（首选，稳定、不受分辨率与改版影响） */
     ACCESSIBILITY,
 
@@ -127,7 +130,7 @@ data class Roi(
  * @param id            方案唯一标识
  * @param name          方案名，展示给用户（如"飞书上班打卡"）
  * @param targetPackage 目标 App 包名
- * @param engine        识别引擎
+ * @param engine        识别方式
  * @param rules         按顺序执行的规则列表
  * @param successRules  判定打卡成功的规则（对这些规则执行 READ_TEXT 并匹配 [successKeywords]）
  * @param successKeywords 成功判定关键词
@@ -142,7 +145,7 @@ data class CheckInProfile(
     val id: String,
     val name: String,
     val targetPackage: String,
-    val engine: CheckInEngine = CheckInEngine.ACCESSIBILITY,
+    val engine: CheckInMode = CheckInMode.ACCESSIBILITY,
     val rules: List<CheckInRule> = emptyList(),
     val successRules: List<CheckInRule> = emptyList(),
     val successKeywords: List<String> = listOf("已打卡", "打卡成功", "已签到"),

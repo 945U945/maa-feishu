@@ -1875,6 +1875,9 @@ MAA will not end an in-progress exploration early because this option is uncheck
     <string name="schedule_health_overlay_desc">An enabled screen-saver strategy requires the overlay permission</string>
     <!-- Trigger log: fix entry for failed results -->
     <string name="schedule_backend_fix_still_not_ready">%1$s is still not authorized: make sure the service is running, or change the startup mode in settings</string>
+    <!-- Shizuku / Root authorization guidance dialog -->
+    <string name="backend_fix_dialog_title">Authorization required</string>
+    <string name="backend_fix_dialog_message">Check-in needs the "%1$s" permission to wake and unlock the device on schedule. Follow the prompts to authorize; if it still fails after authorizing, make sure the service is running.</string>
     <string name="schedule_time_picker_title">Choose time</string>
     <string name="time_picker_am">AM</string>
     <string name="time_picker_pm">PM</string>

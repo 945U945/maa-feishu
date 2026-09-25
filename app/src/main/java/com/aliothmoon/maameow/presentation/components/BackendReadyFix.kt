@@ -1,5 +1,8 @@
 package com.aliothmoon.maameow.presentation.components
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
@@ -98,8 +101,42 @@ fun BackendReadyFixHost(
         if (!readiness.needsGuidance) state.dismiss()
     }
 
-    ShizukuReadinessGate(
+    ShizukuReadinessDialog(
         onDismiss = { state.dismiss() },
         dismissText = stringResource(R.string.common_later),
+        backendDisplay = permissionManager.permissions.startupBackend.display,
+    )
+}
+
+/**
+ * 授权引导弹窗。
+ *
+ * 原工程的 `ShizukuReadinessGate` 是一个常驻引导页（关掉即写 skipShizukuCheck，
+ * 全局不再提醒）。打卡版把它简化成一次性弹窗：只说明「要什么权限、去做什么」，
+ * 关闭不动任何全局设置，避免用户误关后再也看不到提示。
+ *
+ * @param onDismiss     关闭回调
+ * @param dismissText   关闭按钮文案
+ * @param backendDisplay 当前提权后端的展示名（如 "Shizuku" / "Root"）
+ */
+@Composable
+private fun ShizukuReadinessDialog(
+    onDismiss: () -> Unit,
+    dismissText: String,
+    backendDisplay: String,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.backend_fix_dialog_title)) },
+        text = {
+            Text(
+                stringResource(R.string.backend_fix_dialog_message, backendDisplay),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(dismissText)
+            }
+        },
     )
 }

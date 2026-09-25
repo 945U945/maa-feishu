@@ -22,8 +22,6 @@ data class LogItem(
     val showTime: Boolean = true,
     /** 纯文本详情 */
     val tooltip: String? = null,
-    /** 结构化富文本详情，UI 层按主题着色 */
-    val recruitTooltip: List<RecruitCombination>? = null,
     val screenshotPath: String? = null
     // TODO: 实现截图缩略图支持
 ) {
@@ -35,5 +33,5 @@ data class LogItem(
     val formattedTime: String get() = time.format(timeFormatter)
 
     val hasDetails: Boolean
-        get() = tooltip != null || recruitTooltip != null || screenshotPath != null
+        get() = tooltip != null || screenshotPath != null
 }

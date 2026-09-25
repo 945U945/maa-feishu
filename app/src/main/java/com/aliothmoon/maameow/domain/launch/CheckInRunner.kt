@@ -1,7 +1,7 @@
 package com.aliothmoon.maameow.domain.launch
 
 import android.content.Context
-import com.aliothmoon.maameow.app.MainActivity
+import com.aliothmoon.maameow.MainActivity
 import com.aliothmoon.maameow.data.checkin.CheckInRepository
 import com.aliothmoon.maameow.domain.checkin.CheckInEngine
 import com.aliothmoon.maameow.schedule.model.ExecutionResult

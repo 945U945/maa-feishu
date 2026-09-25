@@ -98,10 +98,7 @@ fun AppNavigation(
 
                 // ── 主 Tab：定时任务 ──
                 composable(Routes.SCHEDULE) {
-                    ScheduleListView(
-                        onEdit = { id -> navController.navigate(Routes.scheduleEdit(id)) },
-                        onViewLogs = { navController.navigate(Routes.SCHEDULE_TRIGGER_LOG) },
-                    )
+                    ScheduleListView(navController = navController)
                 }
 
                 // ── 主 Tab：控件探针 ──
@@ -128,40 +125,34 @@ fun AppNavigation(
                     arguments = listOf(navArgument("strategyId") { type = NavType.StringType }),
                 ) { entry ->
                     ScheduleEditView(
+                        navController = navController,
                         strategyId = entry.arguments?.getString("strategyId").orEmpty(),
-                        onBack = { navController.popBackStack() },
                     )
                 }
 
                 // ── 二级页：触发日志 ──
                 composable(Routes.SCHEDULE_TRIGGER_LOG) {
-                    ScheduleTriggerLogView(onBack = { navController.popBackStack() })
+                    ScheduleTriggerLogView(navController = navController)
                 }
 
                 // ── 二级页：通知设置 ──
                 composable(Routes.NOTIFICATION) {
-                    val vm: NotificationSettingsViewModel = koinViewModel()
-                    NotificationSettingsView(
-                        viewModel = vm,
-                        onBack = { navController.popBackStack() },
-                    )
+                    NotificationSettingsView(navController = navController)
                 }
 
                 // ── 二级页：运行日志 ──
                 composable(Routes.LOG_HISTORY) {
-                    val vm: LogHistoryViewModel = koinViewModel()
-                    LogHistoryView(viewModel = vm, onBack = { navController.popBackStack() })
+                    LogHistoryView(navController = navController)
                 }
 
                 // ── 二级页：错误日志 ──
                 composable(Routes.ERROR_LOG) {
-                    val vm: ErrorLogViewModel = koinViewModel()
-                    ErrorLogView(viewModel = vm, onBack = { navController.popBackStack() })
+                    ErrorLogView(navController = navController)
                 }
 
                 // ── 二级页：壁纸 ──
                 composable(Routes.WALLPAPER) {
-                    WallpaperSettingsView(onBack = { navController.popBackStack() })
+                    WallpaperSettingsView(navController = navController)
                 }
             }
         }

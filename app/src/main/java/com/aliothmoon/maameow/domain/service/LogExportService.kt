@@ -181,7 +181,8 @@ class LogExportService(
 
     private fun isBatteryOptimized(): Boolean = runCatching {
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-        !pm.isIgnoringBatteryOptimizations(context.packageName)
+        val ignoring: Boolean = pm.isIgnoringBatteryOptimizations(context.packageName)
+        !ignoring
     }.getOrDefault(false)
 
     /**

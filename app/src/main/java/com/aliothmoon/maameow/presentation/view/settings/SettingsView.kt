@@ -411,7 +411,6 @@ fun SettingsView(
         }
     }
 
-    val changelog by viewModel.currentChangelog.collectAsStateWithLifecycle()
     if (showChangelogDialog) {
         AlertDialog(
             onDismissRequest = { showChangelogDialog = false },
