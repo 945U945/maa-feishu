@@ -9,6 +9,7 @@ import com.feishu.checkin.checkin.data.CheckInPlanRepository
 import com.feishu.checkin.checkin.data.SettingsRepository
 import com.feishu.checkin.checkin.model.CheckInPlan
 import com.feishu.checkin.checkin.model.EntryFormats
+import com.feishu.checkin.checkin.model.EntryStrategy
 import com.feishu.checkin.core.device.HealthStatus
 import com.feishu.checkin.core.device.PermissionChecker
 import com.feishu.checkin.core.shizuku.ShizukuSupport
@@ -40,6 +41,13 @@ data class SettingsUiState(
      * 归入 state 后 UI 层完全不必知道 Shizuku 的存在。
      */
     val shizukuStatus: String = "",
+    /**
+     * 当前方案的入口策略。
+     *
+     * 从 `plans` 里当前选中的那份取出来，而不是单独存一个设置项 ——
+     * 策略本就属于方案（见 [CheckInViewModel.setEntryStrategy] 的注释）。
+     */
+    val entryStrategy: EntryStrategy = EntryStrategy.AUTO,
 )
 
 /**
@@ -81,6 +89,8 @@ class SettingsViewModel(
             health = permissionChecker.checkAll(),
             appVersion = appVersionName(),
             shizukuStatus = shizukuStatus(),
+            entryStrategy = plans.firstOrNull { it.id == settings.planId }?.entryStrategy
+                ?: EntryStrategy.AUTO,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -181,6 +191,28 @@ class SettingsViewModel(
     /** 桌面快捷方式开关 */
     fun setShortcutEnabled(enabled: Boolean) {
         viewModelScope.launch { settingsRepository.setShortcutEnabled(enabled) }
+    }
+
+    /**
+     * 入口策略。
+     *
+     * 写入当前选中的方案。
+     *
+     * ## 为什么是「改方案」而不是「改全局设置」
+     *
+     * [CheckInPlan.entryStrategy] 属于方案（不同方案可以配不同策略，
+     * 比如「搜索版」方案天然就应该是点击导航）。做成全局设置的话，
+     * 切换方案时策略会跟着走 —— 那是错的。
+     *
+     * 而 UI 上它出现在设置页的「打卡入口」区（而不是方案编辑器里），
+     * 是因为绝大多数用户只用内置方案，不必知道"方案"这个抽象。
+     * 这层映射（UI 的入口区 → 当前方案的字段）就落在这里。
+     */
+    fun setEntryStrategy(strategy: EntryStrategy) {
+        viewModelScope.launch {
+            runCatching { planRepository.updateStrategy(settingsRepository.current().planId, strategy) }
+                .onFailure { Timber.w(it, "写入入口策略失败") }
+        }
     }
 
     /** 重新扫描自定义方案文件 */

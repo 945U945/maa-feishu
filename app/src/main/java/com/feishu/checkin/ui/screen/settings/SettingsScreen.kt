@@ -45,6 +45,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
 import com.feishu.checkin.R
 import com.feishu.checkin.checkin.model.CheckInPlan
+import com.feishu.checkin.checkin.model.EntryStrategy
 import com.feishu.checkin.core.time.AppSettings
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -95,8 +96,10 @@ fun SettingsScreen(
             EntrySection(
                 settings = state.settings,
                 shizukuStatus = state.shizukuStatus,
+                entryStrategy = state.entryStrategy,
                 onSaveUrl = viewModel::setEntryUrl,
                 onPaste = viewModel::pasteEntryUrlFromClipboard,
+                onStrategyChange = viewModel::setEntryStrategy,
                 onDeepLinkToggle = viewModel::setDeepLinkEnabled,
                 onShortcutToggle = viewModel::setShortcutEnabled,
             )
@@ -193,8 +196,10 @@ private fun PlanSection(
 private fun EntrySection(
     settings: AppSettings,
     shizukuStatus: String,
+    entryStrategy: EntryStrategy,
     onSaveUrl: (String) -> EntryUrlCheck,
     onPaste: () -> String?,
+    onStrategyChange: (EntryStrategy) -> Unit,
     onDeepLinkToggle: (Boolean) -> Unit,
     onShortcutToggle: (Boolean) -> Unit,
 ) {
@@ -333,6 +338,52 @@ private fun EntrySection(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+
+            // ── 入口策略 ──
+            Text(
+                text = stringResource(R.string.settings_entry_strategy),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = stringResource(R.string.settings_entry_strategy_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+
+            // 三个选项用一个单选组。这里刻意**不用**下拉菜单 ——
+            // 只有三项且文案短，平铺出来用户一眼能比较，
+            // 而下拉需要两次点击才能看到全部选项
+            listOf(
+                EntryStrategy.AUTO to R.string.settings_entry_strategy_auto,
+                EntryStrategy.DEEP_LINK_FIRST to R.string.settings_entry_strategy_deeplink,
+                EntryStrategy.CLICK_ONLY to R.string.settings_entry_strategy_click,
+            ).forEach { (strategy, labelRes) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = strategy == entryStrategy,
+                            onClick = { onStrategyChange(strategy) },
+                        )
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = strategy == entryStrategy,
+                        onClick = { onStrategyChange(strategy) },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(labelRes),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
 
             Spacer(Modifier.height(12.dp))
             HorizontalDivider()

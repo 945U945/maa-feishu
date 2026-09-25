@@ -98,6 +98,11 @@
     <string name="settings_entry_shortcut_desc">深链失败时，尝试通过桌面快捷方式进入</string>
     <string name="settings_entry_shizuku_on">Shizuku 可用：%1$s</string>
     <string name="settings_entry_shizuku_off">Shizuku 未运行（可选，开启后落点判定更准）</string>
+    <string name="settings_entry_strategy">进入方式</string>
+    <string name="settings_entry_strategy_auto">自动（深链 → 点击导航）</string>
+    <string name="settings_entry_strategy_deeplink">只用链接</string>
+    <string name="settings_entry_strategy_click">只用点击导航</string>
+    <string name="settings_entry_strategy_desc">自动最省心；固定其一是为了排查问题时行为可预期</string>
 
     <!-- 控件探针 -->
     <string name="probe_title">控件探针</string>

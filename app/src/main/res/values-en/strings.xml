@@ -98,6 +98,11 @@
     <string name="settings_entry_shortcut_desc">If the link fails, try entering via a desktop shortcut</string>
     <string name="settings_entry_shizuku_on">Shizuku available: %1$s</string>
     <string name="settings_entry_shizuku_off">Shizuku not running (optional; improves landing detection)</string>
+    <string name="settings_entry_strategy">Entry method</string>
+    <string name="settings_entry_strategy_auto">Automatic (deep link → tap navigation)</string>
+    <string name="settings_entry_strategy_deeplink">Link only</string>
+    <string name="settings_entry_strategy_click">Tap navigation only</string>
+    <string name="settings_entry_strategy_desc">Automatic is easiest; pinning one makes troubleshooting predictable</string>
 
     <!-- View inspector -->
     <string name="probe_title">View inspector</string>

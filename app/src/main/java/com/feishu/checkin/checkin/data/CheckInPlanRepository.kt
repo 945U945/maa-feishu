@@ -1,6 +1,7 @@
 package com.feishu.checkin.checkin.data
 
 import com.feishu.checkin.checkin.model.CheckInPlan
+import com.feishu.checkin.checkin.model.EntryStrategy
 import com.feishu.checkin.core.log.AppPaths
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -84,4 +85,32 @@ class CheckInPlanRepository(
 
     /** 当前方案的同步快照 */
     fun snapshot(): List<CheckInPlan> = _plans.value
+
+    /**
+     * 更新某个方案的入口策略。
+     *
+     * ## 为什么写成「覆盖文件」而不是「改内置数据」
+     *
+     * 内置方案刻在不落盘的代码里（见类注释），所以 Geter 修改只能
+     * 落成一份**同 ID 的自定义方案文件** —— 它会在 [loadAll] 里
+     * 覆盖掉内置的那份。这正是类注释里说的「给高级用户一个改内置方案的口子」
+     * 的现成机制，这里只是把它自动化了。
+     *
+     * 写失败不抛异常：策略是**优化项**，写不进去时执行引擎
+     * 仍会用方案自带的默认值跑，只是行为不如用户预期。
+     * 为此让保存动作失败整个设置页，不划算。
+     */
+    suspend fun updateStrategy(planId: String, strategy: EntryStrategy) =
+        withContext(Dispatchers.IO) {
+            val current = _plans.value.firstOrNull { it.id == planId } ?: return@withContext
+            val updated = current.copy(entryStrategy = strategy)
+
+            runCatching {
+                // plansDir 会自动创建
+                val target = File(plansDir, "$planId.json")
+                target.writeText(json.encodeToString(CheckInPlan.serializer(), updated))
+                Timber.i("入口策略已写入: %s -> %s", planId, strategy)
+                _plans.value = loadAll()
+            }.onFailure { Timber.w(it, "写入入口策略失败: %s", planId) }
+        }
 }
