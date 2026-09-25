@@ -1,307 +1,269 @@
-<div align="center">
+# FeishuCheckIn
 
-# 飞书打卡助手 (FeishuCheckIn)
+飞书自动打卡工具。基于 Android **无障碍服务**（AccessibilityService）在预定时刻自动打开飞书并完成上下班打卡。
 
-基于 [MAA-Meow](https://github.com/Aliothmoon/MAA-Meow) 改造的**定时自动打卡工具** —— 目标应用由《明日方舟》替换为**飞书**，游戏相关内容已全部剔除。
-
-</div>
+> 从零重写的版本。核心思路借鉴 [MAA](https://github.com/MaaAssistantArknights/MaaAssistantArknights) 的「把操作路径抽象成数据」与「结果语义严格分离」，但不搬任何游戏相关代码。
 
 ---
 
-## 它做什么
+## 为什么用无障碍，而不是截图 + 图像识别
 
-到点自动唤醒手机 → 解锁 → 打开飞书 → 走考勤打卡流程 → 记录结果并通知你。
+飞书对考勤页面设置了 `FLAG_SECURE`，**任何截图都会返回全黑**。
+图像识别的路线在这一步就死了。
 
-核心能力分三层：
-
-| 层 | 负责 | 实现 |
-| --- | --- | --- |
-| **调度** | 什么时候打卡 | `ScheduleAlarmManager`（精确闹钟）→ `ScheduleTriggerHandler` → `ScheduleExecutionService` |
-| **管线** | 设备准备好了没 | `LaunchPipeline`：唤醒亮屏 → 解锁 → 倒计时 → 拉起目标应用 |
-| **执行** | 具体怎么打卡 | `CheckInRunner` + `CheckInEngine`（无障碍定位控件 → 图像模板兜底） |
-
-职责刻意分离：将来要支持新的打卡目标（钉钉、企业微信），只需新增一套 `CheckInProfile` 规则，调度层与管线完全不用动。
+因此改为读取**控件树**（`AccessibilityNodeInfo`）：
+通过文本 / 类名 / 资源 ID 定位控件，再执行点击。
+好处是稳定、无分辨率依赖；代价是需要用户手动开启无障碍权限。
 
 ---
 
-## 为什么飞书走无障碍
+## 核心设计
 
-飞书开启 `FLAG_SECURE`（防截屏），系统会拒绝任何截屏请求 —— 这是 Android 的安全边界，无法绕过。因此：
+### 1. 点击路径写成数据，不是代码
 
-- **图像模板识别**对飞书**物理不可行**（截出来是黑屏）。
-- **无障碍服务**不受防截屏影响，可以直接读取控件树并执行点击。
+飞书的考勤入口在不同企业、不同版本里位置不同 ——
+有的在工作台，有的在「我的」页，有的企业换成自建应用。
 
-所以本工程采用**双引擎**设计：
+把路径抽象成 `CheckInPlan`（若干有序的 `CheckInStep`）后，
+适配新布局**只需加一份 JSON，不必改代码重新发版**。
 
-- `ACCESSIBILITY` —— 读控件树的 `text` / `viewId` / `contentDesc` 定位，`ACTION_CLICK` 点击。**飞书走这条**。
-- `IMAGE_TEMPLATE` —— 灰度降采样 + 逐像素绝对差匹配（不依赖 OpenCV）。留给没有防截屏的目标应用作兜底。
+内置三个方案（`builtin_workbench` / `builtin_profile` / `builtin_search`），
+自定义方案放在 `<filesDir>/plans/` 下的 json 文件里，同名 ID 时**自定义覆盖内置** ——
+给高级用户一个「改内置方案」的口子。
 
-### 控件探针
+### 2. 三层闹钟恢复
 
-既然截不了图，怎么知道飞书界面长什么样？
+用 `AlarmManager.setAlarmClock` 而非 WorkManager：
+后者最小周期 15 分钟且允许延迟，而打卡时间点不能漂。
 
-App 内置了 **「控件探针」** 页签（`ProbeView`）：它用无障碍服务直接把当前屏幕的**控件树**导出成结构化文本 —— 包含每个节点的 `text`、`viewId`、`contentDesc`、`bounds`、`clickable`。
+代价是状态栏会有常驻闹钟图标。为了应对国产 ROM 拦截开机广播，
+做了三层幂等恢复：
 
-把它导出后，就能据此精确编写/修正打卡规则，不再依赖截图。
+| 层 | 触发时机 | 作用 |
+|---|---|---|
+| 1 | `BootReceiver` 监听 5 个广播 | 正常路径 |
+| 2 | App 冷启动全量重排 | 兜底被拦截的开机广播 |
+| 3 | `MainActivity.onStart` 每次进入都重排 | 用户手动打开最可靠 |
+
+三层都是**幂等**的：先 `cancel` 再 `setAlarmClock`，重复执行无害。
+
+### 3. 「先续排、后执行」
+
+闹钟触发后，先安排下一次闹钟，**再**执行打卡。
+这样即使本次执行卡死或崩溃，下次闹钟已经排好，不会连锁丢失。
+
+### 4. 结果语义严格分离
+
+| 结果 | 是否算失败 | 说明 |
+|---|---|---|
+| `SUCCESS` | 否 | 打卡成功 |
+| `ALREADY_DONE` | **否** | 今天已打过，跳过 |
+| `SKIPPED_BUSY` | **否** | 已有任务在执行 |
+| `ENTRY_NOT_FOUND` | 是 | 找不到打卡入口 |
+| `NETWORK_ERROR` | 是 | 网络问题，**可重试** |
+| `DEVICE_LOCKED` | 是 | 设备锁屏，**不可重试** |
+| `PERMISSION_MISSING` | 是 | 无障碍未开启 |
+| `FAILURE` | 是 | 其他，**可重试** |
+
+关键在于 `ALREADY_DONE` 和 `SKIPPED_BUSY` **不能标红**。
+如果「已打卡」也被当成失败，用户会习惯性忽略所有红色提示，
+真正的「未找到打卡入口」就被淹没了。
+
+重试只针对**可能自愈**的失败（`isRetryable`），不对确定性失败重试。
+
+### 5. 幂等键 = 日期 + 类型
+
+`"${planId}_${kind.name}_${yyyymmdd}"`
+
+防止「同一天被不同触发源各打一次」。这不只是省事 ——
+**重复打卡在有些企业会被记为考勤异常**，所以「不重复打」是正确性要求。
+
+### 6. 平台查询以 lambda 注入
+
+核心类（`CheckInEngine` / `NextTriggerCalculator`）**不持有 Context**。
+需要平台能力时，通过构造函数注入 `() -> Boolean` 这样的 lambda。
+
+好处有两个：
+- 可以在**纯 JVM 环境**写单元测试，不需要 Robolectric
+- 避免「用反射从别的对象掏 Context」这种脆弱写法 ——
+  反射在 R8 混淆后必然失效，那是上一版的闪退根因
+
+### 7. 启动顺序是经过设计的
+
+```
+1. BootTrace.install(this)     ← 零依赖，必须第一句
+2. startKoin { ... }            ← 依赖注入
+3. CrashHandler.install(this)   ← 崩溃落盘
+4. Timber.plant(FileLogTree)    ← 文件日志
+5. 冷启动恢复调度                ← 幂等重排闹钟
+```
+
+`BootTrace` 刻意做到零依赖（只用 `android.util.Log` 和 `java.io`），
+因此可以、也必须排在最前面。
+
+**上一版的教训**：崩溃处理器装在依赖注入之后，
+于是注入阶段抛异常时处理器还没挂上，堆栈既不落盘也进不了 logcat，
+现象是「点图标闪一下就走，且查不到任何原因」。
 
 ---
 
-## 编译成 APK
-
-### 一句话选路线
-
-| 你的情况 | 走哪条 | 耗时 |
-| --- | --- | --- |
-| 没有 Android 开发环境 / 不想装几个 G 的 SDK | **路线 A：GitHub Actions 云端构建** | 约 5–10 分钟 |
-| 已经装了 Android Studio | **路线 B：本地命令行** | 首次约 10–20 分钟 |
-
-要求：**JDK 17**、**Android SDK**（compileSdk 37 / targetSdk 36 / minSdk 28）。**无需 NDK** —— MaaCore 原生代码已全部移除。
-
-> ⚠️ JDK 8 / 11 编不了（AGP 9.2.1 要求 17+）。
-
----
-
-### 路线 A：GitHub Actions 云端构建（推荐）
-
-不需要在本机装任何东西，构建机自带 JDK 17 与 Android SDK。
-
-**A-1. 把工程推到一个 GitHub 仓库**
-
-```bash
-cd FeishuCheckIn
-git init
-git add -A
-git commit -m "feat: 飞书打卡助手"
-git branch -M main
-git remote add origin https://github.com/<你的用户名>/<仓库名>.git
-git push -u origin main
-```
-
-**A-2. 两种出包方式，任选**
-
-**方式一：推 tag 自动出包（最省事）**
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-推送后自动跑 `build-release.yml`，产出三个 ABI 的包并**直接挂到 GitHub Release**上，进仓库的 Releases 页面就能下载。
-
-**方式二：手动触发（想先只出 debug 包试水）**
-
-进仓库 → **Actions** 标签页 → 左侧选工作流：
-
-- **Build Dev APK** → 右侧 `Run workflow` → 出 debug 包
-- **Build Release APK** → 右侧 `Run workflow` → 出 release 包
-
-跑完后在该次运行的页面底部 **Artifacts** 区下载（是一个 zip，解开就是 apk）。
-
-**A-3.（可选）配置签名**
-
-不配也能出包，只是 release 包未签名、无法覆盖安装不同构建的版本。要签名就在仓库 **Settings → Secrets and variables → Actions** 添加四个 Secret：
-
-| Secret 名 | 值 |
-| --- | --- |
-| `KEYSTORE_PATH` | keystore 文件**在构建机上的绝对路径** |
-| `KEYSTORE_PASSWORD` | keystore 密码 |
-| `KEY_ALIAS` | 密钥别名 |
-| `KEY_PASSWORD` | 密钥密码 |
-
-`KEYSTORE_PATH` 需要文件真实存在于构建机上，所以在 CI 里通常要先把 keystore 以 Secret 存成 base64、在流水线里解码落盘。更省事的做法是本地生成 keystore 后用路线 B 自己签。生成 keystore：
-
-```bash
-keytool -genkeypair -v -keystore feishu.jks -alias feishu \
-  -keyalg RSA -keysize 2048 -validity 10000
-```
-
----
-
-### 路线 B：本地命令行构建
-
-**B-1. 装 JDK 17**
-
-- Windows：`winget install EclipseAdoptium.Temurin.17.JDK`，或用 Android Studio 自带的 JBR
-- macOS：`brew install --cask temurin@17`
-- 验证：`java -version` 应显示 `17.x`
-
-**B-2. 装 Android SDK**
-
-最省事是装 [Android Studio](https://developer.android.com/studio)，它会顺带把 SDK 装好。只想要命令行版：
-
-```bash
-# 下载 commandline-tools 后
-sdkmanager "platform-tools" "platforms;android-37" "build-tools;36.0.0"
-```
-
-然后设环境变量（Windows 写进系统环境变量 / macOS 加进 `~/.zshrc`）：
-
-```bash
-export ANDROID_HOME=$HOME/Android/Sdk     # Windows: %LOCALAPPDATA%\Android\Sdk
-export PATH=$PATH:$ANDROID_HOME/platform-tools
-```
-
-**B-3. 指定 JDK 与 SDK 路径**
-
-在工程根目录建 `local.properties`（这个文件不要提交到 git）：
-
-```properties
-sdk.dir=C\:\\Users\\你的用户名\\AppData\\Local\\Android\\Sdk
-```
-
-macOS / Linux 写成 `sdk.dir=/Users/你的用户名/Library/Android/sdk`（注意转义与斜杠方向）。
-
-JDK 若不在默认位置，同样在 `local.properties` 或环境变量里指：
-
-```properties
-org.gradle.java.home=C\:\\Program Files\\Eclipse Adoptium\\jdk-17.0.13.11-hotspot
-```
-
-**B-4. 编译**
-
-```bash
-# Windows 用 gradlew.bat，macOS/Linux 用 ./gradlew
-
-# Debug 包（可直接装，最省事）
-./gradlew assembleDebug
-
-# Release 包（体积小、要签名）
-./gradlew assembleRelease -Pmaa.abi=arm64-v8a
-```
-
-也可以直接用仓库自带的一键脚本（会先做环境自检与字符串校验）：
-
-```bash
-./build_apk.sh                # 编 debug
-./build_apk.sh release        # 编 release
-./build_apk.sh release all    # release + 全 ABI
-```
-
-产物位置：
-
-| 构建 | 路径 |
-| --- | --- |
-| Debug | `app/build/outputs/apk/debug/app-debug.apk` |
-| Release | `app/build/outputs/apk/release/app-release-*.apk` |
-
-`-Pmaa.abi=` 控制 ABI：`all` / `arm64-v8a` / `x86_64`。给真机装用 `arm64-v8a` 即可；不指定时 debug 默认只出 arm64-v8a。
-
-**B-5. 装到手机**
-
-```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-```
-
-或把 apk 拷到手机直接点安装（需在系统设置里允许「安装未知来源应用」）。
-
----
-
-### 常见报错
-
-| 报错 | 原因与解法 |
-| --- | --- |
-| `Unsupported class file major version` / `Android Gradle plugin requires Java 17` | 用的是 JDK 8/11。装 JDK 17 并在 `local.properties` 指 `org.gradle.java.home` |
-| `SDK location not found` | 缺 `local.properties` 或 `sdk.dir` 写错；路径里的 `\` 要转义成 `\\` |
-| `Failed to install the following SDK components: platforms;android-37` | SDK 里没装对应 platform，跑 `sdkmanager "platforms;android-37"`；或在 Android Studio 里让它自动补 |
-| `i18n verify failed: key mismatch` | `values` 与 `values-en` 的字符串 key 集合必须完全一致。改完跑 `python scripts/check_strings.py app/src/main` 定位 |
-| `Cannot find symbol R.string.xxx` | 引用了未定义的字符串。跑 `python scripts/check_strings.py app/src/main` 会列出缺失 key |
-| 首次构建卡在 `Downloading gradle-9.4.1-bin.zip` | 正常，Gradle 发行包约 200MB，耐心等或用代理 |
-
----
-
-### 编译前自检（可选但推荐）
-
-改过工程后先跑一遍，能提前拦住大部分构建失败：
-
-```bash
-python scripts/check_strings.py app/src/main                                 # 字符串资源完整性 + i18n 一致性
-python scripts/check_deps.py app/src/main/java/com/aliothmoon/maameow        # 工程内 import 可达性
-python scripts/prune_stale_tests.py                                          # 失效测试文件
-```
-
-
----
-
-## 安装与首次配置
-
-1. 安装 APK。
-2. **授予无障碍权限** —— 系统设置 → 无障碍 → 已安装的服务 → 开启「飞书打卡助手」。
-   - 主服务 `CheckInAccessibilityService`：读控件树 + 执行点击，**打卡必需**。
-   - 辅助服务 `AccessibilityHelperService`：仅订阅音量键（无内容读取权限），用于双击音量下键唤起悬浮面板。
-3. **授予精确闹钟权限** —— 系统设置 → 应用 → 特殊权限 → 闹钟和提醒。Android 12+ 必需，否则定时不准。
-4. **关闭电池优化** —— 否则系统会在后台冻结进程，定时任务不触发。
-5. **开启自启动** —— 国产 ROM（MIUI / ColorOS / OriginOS 等）需手动允许，App 内会给出跳转引导。
-6. 需要提权（Shizuku / Root）才能使用**自动解锁**；没有提权只能打卡不能自动解锁，需要手动解锁后等打卡流程启动。
-
-### 配置打卡方案
-
-「设置」页可配置：
-
-- 解锁方式（滑动 / PIN / 手势）与自测
-- 手势录制（录音式录制解锁手势，供回放）
-- 定时策略（「定时任务」页签）：固定时间 / 周期执行，支持多方案
-- 通知方式（Webhook / 邮件等）
-- 导入 / 导出配置
-
-内置了飞书考勤打卡方案（`BuiltInProfiles.FEISHU`）。若命中失败，用**控件探针**导出真实控件树，据此调整 `NodeSelector` 的匹配文字即可。
+## 技术栈
+
+| 项 | 版本 |
+|---|---|
+| AGP | 9.2.1 |
+| Kotlin | 2.4.10 |
+| Gradle | 9.4.1 |
+| compileSdk / minSdk / targetSdk | 37 / 28 / 36 |
+| JDK | 17 |
+| Compose BOM | 2026.05.01 |
+| Koin | 4.2.2 |
+| DataStore | 1.2.1 |
+
+**注意**：AGP 9.0+ 内置 Kotlin 支持，
+`org.jetbrains.kotlin.android` 插件**不能再应用**，否则构建直接失败。
 
 ---
 
 ## 工程结构
 
+垂直切片，而不是按「层」分：
+
 ```
-FeishuCheckIn/
-├── app/src/main/java/com/aliothmoon/maameow/
-│   ├── constant/          # 包名、常量（FEISHU_PACKAGE_NAME 等）
-│   ├── data/
-│   │   ├── checkin/       # 打卡方案仓库、背景图存储
-│   │   ├── preferences/   # 设置、配置备份
-│   │   └── model/         # 数据模型
-│   ├── domain/
-│   │   ├── checkin/       # CheckInEngine / BuiltInProfiles / 图像匹配
-│   │   └── launch/        # LaunchPipeline / CheckInRunner（调度执行内核）
-│   ├── schedule/          # 定时任务：闹钟、策略、接收器、UI
-│   ├── service/           # CheckInAccessibilityService / AccessibilityHelperService
-│   ├── overlay/           # 悬浮球控制面板
-│   ├── presentation/      # Compose UI（首页 / 定时 / 探针 / 设置）
-│   ├── manager/           # 权限、Shizuku 安装
-│   ├── remote/            # 提权进程（解锁、触控注入）
-│   └── maa/               # 触控注入核心（InputControlUtils / TouchPointerSequence）
-├── build-logic/           # i18n 校验插件
-├── annotation-api/        # @PrefSchema / @PrefKey 注解
-├── ksp-processor/         # KSP 代码生成
-├── hidden-api/            # 隐藏 API 存根
-└── scripts/               # 静态自检工具
+com/feishu/checkin/
+├── accessibility/          无障碍服务 + 控件查找
+├── checkin/                打卡功能（自成一体的切片）
+│   ├── model/              数据模型（纯数据，可序列化）
+│   ├── data/               持久化与内置方案
+│   ├── engine/             执行引擎
+│   ├── alarm/              闹钟调度
+│   ├── receiver/           广播接收（开机 / 闹钟）
+│   └── service/            前台服务
+├── core/
+│   ├── time/               触发时刻计算（纯函数，重点测试对象）
+│   ├── device/             设备状态、唤醒、权限体检
+│   ├── log/                日志与崩溃落盘
+│   └── di/                 依赖注入
+└── ui/                     三个页面（首页 / 历史 / 设置）
 ```
+
+打卡需要的所有依赖都在 `checkinModule` 里 ——
+上一版闪退的原因之一就是「一个功能的依赖散在三个模块里，漏注册看不出来」。
 
 ---
 
-## 静态自检工具
-
-改工程后建议先跑这两个脚本（CI 也会跑）：
+## 构建与验证
 
 ```bash
-# 校验所有 R.string.* / @string/* 引用都在 strings.xml 中有定义，
-# 并检查 values 与 values-en 的 key 集合是否一致（不一致会导致构建失败）
-python scripts/check_strings.py app/src/main
+# 编译
+./gradlew :app:compileDebugKotlin --no-daemon
 
-# 校验所有 com.aliothmoon.maameow.* 的 import 都指向真实存在的符号
-python scripts/check_deps.py app/src/main/java/com/aliothmoon/maameow
+# 单元测试（31 个用例）
+./gradlew :app:testDebugUnitTest --no-daemon
 
-# 找出引用了已删除符号的测试文件（加 --delete 执行删除）
-python scripts/prune_stale_tests.py
+# Debug 包
+./gradlew :app:assembleDebug --no-daemon
+
+# Release 包（R8 + 签名）
+./gradlew :app:assembleRelease --no-daemon
+```
+
+### 静态自检
+
+两个脚本能在几秒内捕获「编译通过但运行时炸」的问题：
+
+```bash
+python scripts/check_koin.py       # 依赖注入完整性
+python scripts/check_strings.py    # 多语言字符串一致性
+python scripts/check_comment_balance.py   # Kotlin 块注释配对（见下）
+```
+
+### 仓库维护脚本
+
+```bash
+# 完整镜像同步（会删除远端多余文件！）
+python scripts/sync_to_github.py --dry-run
+python scripts/sync_to_github.py
+
+# 配置 CI 签名 secrets
+python scripts/setup_ci_secrets.py
+
+# 查看 CI 状态
+python scripts/ci_status.py
+python scripts/ci_status.py --run <run_id>
+python scripts/ci_status.py --log <run_id>
+```
+
+> ⚠️ **务必用 `sync_to_github.py` 而非 `push_to_github.py`。**
+> 后者只有「新增 + 更新」语义，没有删除。
+> 在推倒重写的场景下会把旧代码留在远端，CI 就会 checkout 到
+> 一棵新旧混合的树，报出大量指向错误方向的错误。
+
+---
+
+## 签名
+
+Release 包用 `keystore/feishu-checkin.jks` 签名。
+密钥库**不入仓库**（`.gitignore` 已排除），CI 通过 secrets 还原：
+
+| Secret | 值 |
+|---|---|
+| `KEYSTORE_BASE64` | keystore 的 base64 |
+| `KEYSTORE_PASSWORD` | 密钥库口令 |
+| `KEY_ALIAS` | `feishu-checkin` |
+| `KEY_PASSWORD` | 密钥口令 |
+| `KEYSTORE_PATH` | `release.jks`（**相对仓库根**） |
+
+路径基准是三方对齐的：代码用 `rootProject.file()` 解析，
+CI 把 keystore 还原到仓库根，secret 填不带目录的文件名。
+
+### 校验签名
+
+**APK 签名块不在 `META-INF/` 里。** v2/v3 签名位于 ZIP 中央目录之后的
+APK Signing Block，特征是魔数 `APK Sig Block 42`。
+只扫 `META-INF/` 会把已签名的包误判成未签名。
+
+```bash
+grep -a -q "APK Sig Block 42" app-release.apk && echo signed || echo unsigned
+apksigner verify --verbose --print-certs app-release.apk
 ```
 
 ---
 
-## 相对原 MAA-Meow 的改动
+## 已知限制
 
-**保留**：定时调度内核、权限层、唤醒解锁（Shizuku/Root 提权 + 手势录制回放）、触控注入、通知体系、主题与外观、日志导出。
-
-**移除**：MaaCore 与全部原生代码、虚拟屏、游戏资源包、任务链与干员识别、成就系统、首启引导、公告、画中画、企划/抄作业、企鹅物流与一图流上报、Mirror酱更新渠道。
+- **锁屏状态下无法打卡**。有密码的设备系统必须要求用户交互，
+  第三方应用无解。引擎会如实返回 `DEVICE_LOCKED`，不会假装成功。
+- 需要用户手动开启无障碍权限，并建议关闭电池优化。
+- 飞书版本更新可能导致内置方案的控件文案失效，
+  此时可用「控件探针」导出当前页面结构，据此编写自定义方案 JSON。
 
 ---
 
-## 授权
+## 开发时踩过的坑
 
-沿用上游授权：见 [LICENSE](LICENSE) 与 [LICENSE-Apache-2.0](LICENSE-Apache-2.0)。
+这些坑都写进了代码注释，也浓缩在这里，避免重复踩：
+
+1. **Kotlin 块注释会嵌套**。注释里写 `plans/*.json` 会让 `/*` 开启嵌套注释，
+   整个文件解析失败，然后**所有引用它的文件都报 `Unresolved reference`** ——
+   1 个语法错误表现为 30 个分散的错误。
+   排查用 `scripts/check_comment_balance.py`。
+2. **`@Volatile` 不能标注局部变量**（它作用于字段）。
+   被闭包捕获的 var 本就没有 volatile 语义。
+3. **`koin.get(clazz = KClass<*>)`** 需要显式类型实参，
+   星投影推断不出 `T`。
+4. **依赖图自检不能放在 `startKoin { }` 块内** ——
+   块内实例未装配完，会把正常注册误判为缺失。
+5. **Compose 里必须用 `koinViewModel()`**，
+   `androidx.lifecycle...viewModel()` 不认识 Koin，运行时会崩而编译期不报错。
+6. **Splash 主题引用的图标类型要对**：
+   前景图在 `drawable/`，写成 `@mipmap/` 会 AAPT2 报资源找不到。
+7. **`android-actions/setup-android` 在新 runner 上会失败** ——
+   它内部执行 `sdkmanager "tools"`，而 `tools` 包已从仓库移除。
+   已改为手工配置 SDK。
+
+---
+
+## 许可
+
+个人自用工具。

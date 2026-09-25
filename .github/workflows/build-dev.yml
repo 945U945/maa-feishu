@@ -119,6 +119,14 @@ jobs:
         run: |
           python3 scripts/check_koin.py
 
+      # Kotlin 块注释可嵌套，注释里的 `/*`（如写成 `plans/*.json`）
+      # 会开启嵌套注释，导致整个文件解析失败 ——
+      # 而症状是「其它文件报几十个 Unresolved reference」，极易误诊。
+      # 这个检查几毫秒就能跑完，值得放在最前面。
+      - name: Static check — Kotlin 块注释配对
+        run: |
+          python3 scripts/check_comment_balance.py app/src
+
       - name: Static check — 字符串资源一致性
         run: |
           python3 scripts/check_strings.py

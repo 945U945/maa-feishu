@@ -139,6 +139,9 @@ jobs:
       - name: Static check — Koin 依赖完整性
         run: python3 scripts/check_koin.py
 
+      - name: Static check — Kotlin 块注释配对
+        run: python3 scripts/check_comment_balance.py app/src
+
       - name: Static check — 字符串资源一致性
         run: python3 scripts/check_strings.py
 
