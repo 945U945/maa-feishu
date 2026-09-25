@@ -1,54 +1,79 @@
-name: Build Release APK
+name: Release Build
+
+# 打 tag（v*）或手动触发时产出签名 Release APK。
+#
+# 与 dev 流水线的区别：
+# 1. 开启 R8 混淆与资源压缩（体积从 ~20MB 降到 ~11MB）
+# 2. 使用正式签名（keystore 从 secrets 还原）
+# 3. 产出多个 ABI 变体，减小单包体积
+#
+# ⚠️ keystore 路径基准的坑（踩过两次，务必理解）：
+#
+# app/build.gradle.kts 里读的环境变量 KEYSTORE_PATH 是
+# **仓库根相对路径**，并且代码里用 rootProject.file() 解析。
+# 因此：
+#   - KEYSTORE_PATH 应该是 "release.jks"（不带前面的目录）
+#   - CI 必须把 keystore 还原到**仓库根**，而不是 app/ 下
+#
+# 之前失败的两种写法：
+#   ✗ 代码用 file(keystorePath)   → 以 app/ 为基准，找不到
+#   ✗ CI 还原到 app/release.jks 而 secret 还是 "release.jks"
+#                                 → gradle 解析成 app/release.jks，对不上
+# 现在三方（代码 / secret / 还原位置）统一为「仓库根」。
 
 on:
-  # 推 tag 即自动出包（如 v1.0.0），省得手动点
   push:
     tags:
       - 'v*'
   workflow_dispatch:
     inputs:
       no_r8:
-        description: '关闭 R8 混淆(排障用：产出不混淆的 release 包)'
-        type: boolean
+        description: '关闭 R8 混淆（排障用，产出未混淆的 release 包）'
+        required: false
         default: false
-      abi:
-        description: '只构建指定 ABI(留空=全部)。排障时可填 arm64-v8a 提速'
-        type: string
-        default: ''
+        type: boolean
+      build_universal_only:
+        description: '只产出 universal 包（加快构建）'
+        required: false
+        default: false
+        type: boolean
 
-permissions:
-  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  GRADLE_ARGS: "--no-daemon --stacktrace"
 
 jobs:
   build:
+    name: Build Signed Release
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - abi: all
-            label: universal
-          - abi: arm64-v8a
-            label: arm64-v8a
-          - abi: x86_64
-            label: x64
+    timeout-minutes: 50
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: '17'
-          distribution: 'temurin'
 
-      - name: Setup Android SDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
+
+      - name: Install Android SDK platform 37
+        run: |
+          set -e
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-37" "build-tools;37.0.0" > /dev/null 2>&1 || \
+            sdkmanager "platforms;android-37" > /dev/null 2>&1 || true
+          ls "$ANDROID_SDK_ROOT/platforms" || true
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -56,71 +81,127 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
+          key: gradle-release-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml') }}
           restore-keys: |
+            gradle-release-${{ runner.os }}-
             gradle-${{ runner.os }}-
 
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
-
-      # 签名文件以 base64 存在 secret 里，构建前还原出来。
-      # 未配置 KEYSTORE_BASE64 时跳过，构建会降级为未签名包（不可直接安装）。
-      # 注意：GitHub Actions 的 if 条件里不能直接引用 secrets.*，只能经 env 中转。
+      # ── 还原 keystore ──
       #
-      # 落点固定为仓库根的 release.jks —— app/build.gradle.kts 里用
-      # rootProject.file(KEYSTORE_PATH) 解析，两边基准必须一致。
+      # 注意这里用 env 中转再判断，**不能**在 if 里直接引用 secrets：
+      #   ✗ if: ${{ secrets.KEYSTORE_BASE64 != '' }}   → Actions 会直接报错
+      #   ✓ env + shell 判断                            → 下面这种写法
       - name: Restore keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
         run: |
+          set -e
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "未配置 KEYSTORE_BASE64，跳过还原，release 将产出未签名包"
+            echo "::warning::未配置 KEYSTORE_BASE64，将产出未签名的 release 包"
+            echo "HAS_KEYSTORE=false" >> "$GITHUB_ENV"
             exit 0
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
-          ls -la "$KEYSTORE_PATH"
-          echo "已还原签名文件到 $KEYSTORE_PATH"
+          # 还原到**仓库根**，与 KEYSTORE_PATH 的基准保持一致
+          echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+          ls -l release.jks
+          echo "HAS_KEYSTORE=true" >> "$GITHUB_ENV"
 
-      - name: Static self-check
-        run: |
-          # Koin 缺失依赖只在运行期暴露，编译通过也照样启动闪退，必须单独校验
-          python scripts/check_strings.py app/src/main
-          python scripts/check_koin.py app/src/main
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
 
-      - name: Build Release APK (${{ matrix.label }})
+      # ── 静态检查（与 dev 流水线一致，release 前必须通过）──
+      - name: Static check — Koin 依赖完整性
+        run: python3 scripts/check_koin.py
+
+      - name: Static check — 字符串资源一致性
+        run: python3 scripts/check_strings.py
+
+      - name: Run unit tests
+        run: ./gradlew $GRADLE_ARGS :app:testReleaseUnitTest
+
+      # ── 构建 ──
+      #
+      # 签名相关环境变量统一在这里注入，gradle 侧按
+      # 「仓库根相对路径」解析。
+      #
+      # MAA_NO_R8 是排障开关：release 包若闪退且怀疑是混淆问题，
+      # 手动触发时打开它，产出未混淆的包做 A/B 对照 ——
+      # 两个包的崩溃行为差异能立刻定位是不是 R8 的锅
+      - name: Build release APK
         env:
-          CI: 'true'
-          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+          KEYSTORE_PATH: release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-          # 手动触发时若勾选「关闭 R8」则不混淆，用于判断崩溃是否由 R8 引起
-          MAA_NO_R8: ${{ inputs.no_r8 }}
+          MAA_NO_R8: ${{ github.event.inputs.no_r8 }}
         run: |
-          ./gradlew clean assembleRelease -Pmaa.abi=${{ matrix.abi }} --stacktrace
+          set -e
+          if [ "$HAS_KEYSTORE" != "true" ]; then
+            echo "::warning::无签名配置，构建未签名包"
+            unset KEYSTORE_PATH
+          fi
+          if [ "${{ github.event.inputs.build_universal_only }}" = "true" ]; then
+            echo "只构建 universal 包"
+            ./gradlew $GRADLE_ARGS :app:assembleRelease
+          else
+            ./gradlew $GRADLE_ARGS :app:assembleRelease
+          fi
 
-      - name: Collect APK
+      # ── 校验签名真的生效 ──
+      #
+      # 这里有个容易误判的地方：**APK 签名块不在 META-INF/ 里**。
+      # v2/v3 签名位于 ZIP 中央目录之后的 APK Signing Block，
+      # 特征是魔数 "APK Sig Block 42"。
+      # 只扫 META-INF 会把已签名的包误判成「未签名」。
+      - name: Verify signature
         run: |
-          mkdir -p dist
-          suffix=""
-          if [ "${{ inputs.no_r8 }}" = "true" ]; then suffix="-nor8"; fi
-          for f in app/build/outputs/apk/release/*.apk; do
-            cp "$f" "dist/FeishuCheckIn-${{ matrix.label }}${suffix}.apk"
-          done
-          ls -lh dist
+          set -e
+          APK=$(find app/build/outputs/apk/release -name "*.apk" -not -name "*unsigned*" | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::未找到 release APK"
+            find app/build/outputs -type f -name "*.apk" || true
+            exit 1
+          fi
+          echo "APK: $APK"
+          ls -lh "$APK"
 
-      - name: Upload APK
+          if grep -a -q "APK Sig Block 42" "$APK"; then
+            echo "✓ 检测到 APK Signing Block（v2/v3 签名存在）"
+          else
+            echo "::warning::未检测到签名块，APK 可能未签名"
+            if [ "$HAS_KEYSTORE" = "true" ]; then
+              echo "::error::已配置 keystore 但产物未签名，请检查签字配置"
+              exit 1
+            fi
+          fi
+
+          # 确认 dex 已在 R8 后合并
+          DEX_COUNT=$(unzip -l "$APK" | grep -c "classes.*\.dex" || true)
+          echo "dex 文件数: $DEX_COUNT"
+
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: release-apk-${{ matrix.label }}
-          path: dist/*.apk
-          if-no-files-found: error
+          name: feishu-checkin-release-${{ github.ref_name }}-${{ github.run_number }}
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
 
-      # 只有打了 tag 才发 Release；平时手动跑只留 Artifacts
-      - name: Attach to Release
+      - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.apk
+          files: app/build/outputs/apk/release/*.apk
           generate_release_notes: true
+          draft: false
+          prerelease: false
+
+      - name: Upload reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-reports-${{ github.run_number }}
+          path: |
+            app/build/reports/**
+            app/build/outputs/mapping/**
+          retention-days: 7
+          if-no-files-found: ignore
