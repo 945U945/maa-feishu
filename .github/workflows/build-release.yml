@@ -54,6 +54,21 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      # 签名文件以 base64 存在 secret 里，构建前还原到 KEYSTORE_PATH 指定的位置。
+      # 未配置 KEYSTORE_BASE64 时跳过，构建会降级为未签名包（不可直接安装）。
+      # 注意：GitHub Actions 的 if 条件里不能直接引用 secrets.*，只能经 env 中转。
+      - name: Restore keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "未配置 KEYSTORE_BASE64，跳过还原，release 将产出未签名包"
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          echo "已还原签名文件到 $KEYSTORE_PATH"
+
       - name: Static self-check
         run: |
           # Koin 缺失依赖只在运行期暴露，编译通过也照样启动闪退，必须单独校验
