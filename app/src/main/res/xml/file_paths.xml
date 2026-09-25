@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 日志导出分享 -->
+    <files-path
+        name="logs"
+        path="logs/" />
+    <files-path
+        name="checkin_records"
+        path="checkin_records/" />
+    <cache-path
+        name="temp"
+        path="temp/" />
+</paths>
