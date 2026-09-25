@@ -116,8 +116,19 @@ jobs:
       - name: Static check — 字符串资源一致性
         run: python3 scripts/check_strings.py
 
+      # 注意跑的是 testDebugUnitTest 而非 testReleaseUnitTest。
+      #
+      # AGP 只为 debug 变体创建 unitTest 任务，release 没有 ——
+      # 写 testReleaseUnitTest 会直接报 "task not found"，
+      # 那是任务不存在，不是测试失败，容易被误读成代码有问题。
+      # （曾试图用 androidComponents 打开 release 的 unitTest 变体，
+      #   但 enableUnitTest 所属的 HasUnitTestBuilder 不在构建脚本
+      #   classpath 上，Kotlin DSL 解析不到该属性。详见 app/build.gradle.kts）
+      #
+      # 单测覆盖的是纯 JVM 逻辑（时间计算、结果语义），不涉及混淆，
+      # 因此跑 debug 变体的测试已足够。
       - name: Run unit tests
-        run: ./gradlew $GRADLE_ARGS :app:testReleaseUnitTest
+        run: ./gradlew $GRADLE_ARGS :app:testDebugUnitTest
 
       # ── 构建 ──
       #
