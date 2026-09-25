@@ -206,7 +206,7 @@ val appModule = module {
 
     // 悬浮窗
     singleOf(::BorderOverlayManager)
-    single<ScreenSaverController> { ScreenSaverOverlayManager(get()) }
+    single<ScreenSaverController> { ScreenSaverOverlayManager(androidContext(), get()) }
     singleOf(::OverlayViewModelOwner)
     singleOf(::OverlayController)
 
