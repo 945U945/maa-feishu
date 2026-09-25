@@ -54,6 +54,12 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Static self-check
+        run: |
+          # Koin 缺失依赖只在运行期暴露，编译通过也照样启动闪退，必须单独校验
+          python scripts/check_strings.py app/src/main
+          python scripts/check_koin.py app/src/main
+
       - name: Build Release APK (${{ matrix.label }})
         env:
           CI: 'true'
