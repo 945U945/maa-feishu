@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  无障碍服务能力声明。
+
+  设计取舍：
+
+  1. 只监听飞书两个包名（packageNames），而不是全部应用。
+     好处：系统只在切到飞书时唤醒本服务，省电、降低误触风险。
+     代价：用户若把打卡目标换成其它 App，需要改这里 —— 故界面上给出提示。
+
+  2. canRetrieveWindowContent 必须为 true：控件探针与点击定位都依赖它。
+
+  3. 不声明 canTakeScreenshot：
+     飞书对考勤等关键页设了 FLAG_SECURE，截图只会得到黑屏，
+     因此本项目的路线是纯控件树操作，不做图像识别。
+
+  4. flags 说明：
+     - flagReportViewIds        读取 viewIdResourceName，用于稳定定位控件
+     - flagRetrieveInteractiveWindows  可遍历所有可交互窗口（弹窗、浮层）
+     - flagIncludeNotImportantViews   部分容器被标为 not important，但实际可点
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewFocused"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="100"
+    android:packageNames="com.ss.android.lark,com.larksuite.suite"
+    android:settingsActivity="com.feishu.checkin.MainActivity" />
