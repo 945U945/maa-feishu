@@ -1,42 +1,39 @@
-.DS_Store
-/captures
-.externalNativeBuild
-local.properties
-*.jks
-*.b64
-AGENTS.md
-/.vscode/
+# ══════════════════════════════════════════════════════════════
+#  Git 忽略规则
+# ══════════════════════════════════════════════════════════════
 
-# Generated files
-bin/
-gen/
-out/
-
-# Gradle files
-.gradle/
-**/build/
-
-# Gradle/Android Studio
-versionname.txt
-versioncode.txt
-android/.cxx
-
-# Log Files
-*.log
-
-# Python
-__pycache__/
-
-# IntelliJ
+# ── 构建产物 ──
 *.iml
+.gradle/
+build/
+app/build/
+captures/
+.externalNativeBuild/
+.cxx/
+release/
+
+# ── 本地配置（含机器相关路径，绝不能提交）──
+local.properties
+
+# ── 签名文件 ──
+#
+# ⚠️ 这一条非常重要：keystore 与密码一旦进仓库，
+#    任何人都能签发以你的名义发布的 APK。
+#    CI 通过 GitHub secrets 还原，本地开发通过 local.properties 提供。
+*.jks
+*.keystore
+keystore.properties
+
+# ── IDE ──
 .idea/
+*.hprof
+.kotlin/
 
-# App Build
-/app/release
-/app/debug
-/gradle/gradle-daemon-jvm.properties
+# ── 系统 ──
+.DS_Store
+Thumbs.db
+*.swp
 
-# 本地工具目录
-.pi/
-tmp.txt
-.cache/
+# ── 日志与临时文件 ──
+*.log
+*.tmp
