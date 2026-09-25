@@ -1,0 +1,488 @@
+package com.aliothmoon.maameow.presentation.viewmodel
+
+import android.app.Application
+import android.graphics.Bitmap
+import android.net.Uri
+import android.os.SystemClock
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.aliothmoon.maameow.BuildConfig
+import com.aliothmoon.maameow.R
+import com.aliothmoon.maameow.constant.DefaultDisplayConfig
+import com.aliothmoon.maameow.constant.FEISHU_PACKAGE_NAME
+import com.aliothmoon.maameow.data.model.update.UpdateChannel
+import com.aliothmoon.maameow.data.preferences.AppSettingsManager
+import com.aliothmoon.maameow.data.preferences.ConfigBackupManager
+import com.aliothmoon.maameow.data.preferences.UnlockGestureStore
+import com.aliothmoon.maameow.data.checkin.BackgroundImageStore
+import com.aliothmoon.maameow.domain.models.GestureRecordResult
+import com.aliothmoon.maameow.domain.models.GestureRecordStatus
+import com.aliothmoon.maameow.domain.models.RemoteBackend
+import com.aliothmoon.maameow.domain.models.UnlockCredential
+import com.aliothmoon.maameow.domain.models.UnlockGesture
+import com.aliothmoon.maameow.domain.service.WakeUnlockEngine
+import com.aliothmoon.maameow.manager.PermissionManager
+import com.aliothmoon.maameow.manager.RemoteServiceManager
+import com.aliothmoon.maameow.utils.Misc
+import com.aliothmoon.maameow.utils.i18n.LocaleBootstrap.resolveSelectedLanguage
+import com.aliothmoon.maameow.utils.i18n.LocaleBootstrap.toLocaleList
+import com.aliothmoon.maameow.utils.i18n.UiText
+import com.aliothmoon.maameow.utils.i18n.uiTextOf
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import timber.log.Timber
+import java.io.InputStream
+import java.io.OutputStream
+import kotlin.time.Duration.Companion.milliseconds
+
+/** markdown 是 Mirror 酱下发的远端正文，没有资源可以支撑，不套 UiText */
+data class ChangelogArchive(
+    val version: String,
+    val markdown: String,
+)
+
+/**
+ * 设置页 ViewModel。
+ *
+ * 飞书打卡版：移除了全部 MaaCore / 游戏侧配置（core 数据目录、企鹅物流上报、
+ * 一图流 Token、干员识别、虚拟屏全屏、画中画首页等），只保留与「定时唤醒 + 打卡」
+ * 真正相关的设置项。
+ */
+class SettingsViewModel(
+    private val app: Application,
+    private val appSettingsManager: AppSettingsManager,
+    private val permissionManager: PermissionManager,
+    private val configBackupManager: ConfigBackupManager,
+    private val backgroundImageStore: BackgroundImageStore,
+    private val wakeUnlockEngine: WakeUnlockEngine,
+    private val unlockGestureStore: UnlockGestureStore,
+) : ViewModel() {
+
+    // ========== 导入导出 ==========
+
+    private val _settingsMessage = MutableStateFlow<UiText?>(null)
+    val settingsMessage: StateFlow<UiText?> = _settingsMessage.asStateFlow()
+
+    private val _showRestartDialog = MutableStateFlow(false)
+    val showRestartDialog: StateFlow<Boolean> = _showRestartDialog.asStateFlow()
+
+    fun clearSettingsMessage() {
+        _settingsMessage.value = null
+    }
+
+    fun dismissRestartDialog() {
+        _showRestartDialog.value = false
+    }
+
+    fun confirmRestart() {
+        _showRestartDialog.value = false
+        Misc.restartApp(app)
+    }
+
+    fun exportConfig(outputStream: OutputStream) {
+        viewModelScope.launch {
+            try {
+                configBackupManager.exportTo(outputStream)
+                _settingsMessage.value = uiTextOf(R.string.settings_export_success)
+            } catch (e: Exception) {
+                Timber.e(e, "export config failed")
+                _settingsMessage.value =
+                    uiTextOf(R.string.settings_export_failed, e.message.orEmpty())
+            }
+        }
+    }
+
+    fun importConfig(inputStream: InputStream) {
+        viewModelScope.launch {
+            try {
+                configBackupManager.importFrom(inputStream)
+                _showRestartDialog.value = true
+            } catch (e: Exception) {
+                Timber.e(e, "import config failed")
+                _settingsMessage.value =
+                    uiTextOf(R.string.settings_import_failed, e.message.orEmpty())
+            }
+        }
+    }
+
+    // ========== 通用开关 ==========
+
+    val debugMode: StateFlow<Boolean> = appSettingsManager.debugMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    fun setDebugMode(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettingsManager.setDebugMode(enabled)
+            val state = RemoteServiceManager.state.value
+            if (state is RemoteServiceManager.ServiceState.Connected) {
+                RemoteServiceManager.unbind()
+            }
+            if (enabled) {
+                Misc.restartApp(app)
+            }
+        }
+    }
+
+    val autoCheckUpdate: StateFlow<Boolean> = appSettingsManager.autoCheckUpdate
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            !BuildConfig.DEBUG
+        )
+
+    fun setAutoCheckUpdate(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettingsManager.setAutoCheckUpdate(enabled)
+        }
+    }
+
+    val autoDownloadUpdate: StateFlow<Boolean> = appSettingsManager.autoDownloadUpdate
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    fun setAutoDownloadUpdate(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettingsManager.setAutoDownloadUpdate(enabled)
+        }
+    }
+
+    val updateChannel: StateFlow<UpdateChannel> = appSettingsManager.updateChannel
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UpdateChannel.STABLE)
+
+    fun setUpdateChannel(channel: UpdateChannel) {
+        viewModelScope.launch {
+            appSettingsManager.setUpdateChannel(channel)
+        }
+    }
+
+    // ========== 提权后端（唤醒解锁需要） ==========
+
+    val startupBackend: StateFlow<RemoteBackend> = appSettingsManager.startupBackend
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), RemoteBackend.SHIZUKU)
+
+    fun setStartupBackend(backend: RemoteBackend) {
+        viewModelScope.launch {
+            permissionManager.setStartupBackend(backend)
+        }
+    }
+
+    val skipShizukuCheck: StateFlow<Boolean> = appSettingsManager.skipShizukuCheck
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    fun setSkipShizukuCheck(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettingsManager.setSkipShizukuCheck(enabled)
+        }
+    }
+
+    // ========== 外观 ==========
+
+    val themeMode: StateFlow<AppSettingsManager.ThemeMode> = appSettingsManager.themeMode
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            AppSettingsManager.ThemeMode.WHITE
+        )
+
+    fun setThemeMode(mode: AppSettingsManager.ThemeMode) {
+        viewModelScope.launch {
+            appSettingsManager.setThemeMode(mode)
+        }
+    }
+
+    val language: StateFlow<AppSettingsManager.AppLanguage> = appSettingsManager.language
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000),
+            AppSettingsManager.AppLanguage.SYSTEM
+        )
+
+    fun setLanguage(lang: AppSettingsManager.AppLanguage) {
+        viewModelScope.launch {
+            val resolved = resolveSelectedLanguage(lang)
+            appSettingsManager.setLanguage(resolved)
+            AppCompatDelegate.setApplicationLocales(resolved.toLocaleList())
+        }
+    }
+
+    /** 仅影响自定义背景图解码用的目标分辨率，与游戏客户端无关 */
+    val backgroundResolution: StateFlow<DefaultDisplayConfig.ResolutionPreference> =
+        appSettingsManager.backgroundResolution
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5000),
+                DefaultDisplayConfig.ResolutionPreference.P720
+            )
+
+    fun setBackgroundResolution(pref: DefaultDisplayConfig.ResolutionPreference) {
+        viewModelScope.launch {
+            appSettingsManager.setBackgroundResolution(pref)
+        }
+    }
+
+    val useSystemMonetColor: StateFlow<Boolean> = appSettingsManager.useSystemMonetColor
+
+    fun setUseSystemMonetColor(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettingsManager.setUseSystemMonetColor(enabled)
+        }
+    }
+
+    val fontSizeScale: StateFlow<Int> = appSettingsManager.fontSizeScale
+
+    fun setFontSizeScale(scale: Int) {
+        viewModelScope.launch {
+            appSettingsManager.setFontSizeScale(scale)
+        }
+    }
+
+    // ============ 自定义图片背景 ============
+
+    val customBackgroundEnabled: StateFlow<Boolean> = appSettingsManager.customBackgroundEnabled
+    val customBackgroundImageAlpha: StateFlow<Int> = appSettingsManager.customBackgroundImageAlpha
+    val customBackgroundScrim: StateFlow<Int> = appSettingsManager.customBackgroundScrim
+    val customBackgroundBlur: StateFlow<Int> = appSettingsManager.customBackgroundBlur
+    val backgroundImage: StateFlow<ImageBitmap?> = backgroundImageStore.imageBitmap
+    val customBackgroundMonet: StateFlow<Boolean> = appSettingsManager.customBackgroundMonet
+
+    fun setCustomBackgroundEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettingsManager.setCustomBackgroundEnabled(enabled)
+        }
+    }
+
+    /** 把选中的图片复制到缓存目录，返回文件路径；失败返回 null。 */
+    suspend fun prepareBackgroundSource(uri: Uri): String? =
+        backgroundImageStore.prepareSource(uri)
+
+    /** 按 EXIF 方向解码裁剪源图片；失败返回 null。 */
+    suspend fun decodeBackgroundSource(path: String): Bitmap? =
+        backgroundImageStore.decodeSource(path)
+
+    /** 保存裁剪结果并启用背景；返回是否成功。 */
+    suspend fun saveCroppedBackground(bitmap: Bitmap): Boolean =
+        backgroundImageStore.saveCropped(bitmap)
+
+    /** 取消裁剪或保存完成后清理源图片缓存。 */
+    fun discardBackgroundSource() {
+        backgroundImageStore.clearSourceCache()
+    }
+
+    fun removeBackgroundImage() {
+        viewModelScope.launch {
+            backgroundImageStore.clear()
+        }
+    }
+
+    fun setCustomBackgroundImageAlpha(value: Int) {
+        viewModelScope.launch {
+            appSettingsManager.setCustomBackgroundImageAlpha(value)
+        }
+    }
+
+    fun setCustomBackgroundScrim(value: Int) {
+        viewModelScope.launch {
+            appSettingsManager.setCustomBackgroundScrim(value)
+        }
+    }
+
+    fun setCustomBackgroundBlur(value: Int) {
+        viewModelScope.launch {
+            appSettingsManager.setCustomBackgroundBlur(value)
+        }
+    }
+
+    fun setCustomBackgroundMonet(enabled: Boolean) {
+        viewModelScope.launch {
+            appSettingsManager.setCustomBackgroundMonet(enabled)
+        }
+    }
+
+    // ========== 定时唤醒自动解锁 ==========
+
+    /** 解锁方式：swipe / pin / password / none，见 [UnlockCredential] */
+    val wakeUnlockType: StateFlow<String> =
+        appSettingsManager.wakeUnlockType
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UnlockCredential.TYPE_SWIPE)
+
+    fun setWakeUnlockType(type: String) {
+        viewModelScope.launch { appSettingsManager.setWakeUnlockType(type) }
+    }
+
+    val wakeCredential: StateFlow<String> =
+        appSettingsManager.wakeCredential
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    fun setWakeCredential(credential: String) {
+        viewModelScope.launch { appSettingsManager.setWakeCredential(credential) }
+    }
+
+    /** null=未测试，Testing=进行中，Done=已出结果 */
+    sealed interface WakeTestState {
+        data object Testing : WakeTestState
+        data class Done(val result: WakeUnlockEngine.WakeResult) : WakeTestState
+    }
+
+    private val _wakeTestState = MutableStateFlow<WakeTestState?>(null)
+    val wakeTestState: StateFlow<WakeTestState?> = _wakeTestState.asStateFlow()
+
+    fun runWakeTest() {
+        if (_wakeTestState.value == WakeTestState.Testing) return
+        viewModelScope.launch {
+            _wakeTestState.value = WakeTestState.Testing
+            val type = appSettingsManager.wakeUnlockType.value
+            val credential = UnlockCredential.of(
+                type = type,
+                pin = appSettingsManager.wakeCredential.value,
+                gestureJson = if (type == UnlockCredential.TYPE_GESTURE) {
+                    unlockGestureStore.readJson()
+                } else {
+                    ""
+                },
+            )
+            _wakeTestState.value = WakeTestState.Done(wakeUnlockEngine.testUnlock(credential))
+        }
+    }
+
+    fun clearWakeTestResult() {
+        _wakeTestState.value = null
+    }
+
+    // ========== 解锁手势录制 ==========
+
+    val unlockGesture: StateFlow<UnlockGesture?> = unlockGestureStore.gesture
+
+    /** null=空闲；录制期间 App 在锁屏后面，只能靠轮询回收结果 */
+    sealed interface GestureRecordState {
+        /** 已发起，等提权进程锁屏 */
+        data object Preparing : GestureRecordState
+        data object Recording : GestureRecordState
+        data class Done(val steps: Int) : GestureRecordState
+        data class Failed(val result: WakeUnlockEngine.WakeResult) : GestureRecordState
+    }
+
+    private val _gestureRecordState = MutableStateFlow<GestureRecordState?>(null)
+    val gestureRecordState: StateFlow<GestureRecordState?> = _gestureRecordState.asStateFlow()
+
+    private var recordJob: Job? = null
+
+    fun startGestureRecord() {
+        if (recordJob?.isActive == true) return
+        recordJob = viewModelScope.launch {
+            _gestureRecordState.value = GestureRecordState.Preparing
+            if (!wakeUnlockEngine.startGestureRecord(RECORD_TIMEOUT_MS)) {
+                _gestureRecordState.value =
+                    GestureRecordState.Failed(WakeUnlockEngine.WakeResult.IPC_FAILED)
+                return@launch
+            }
+            _gestureRecordState.value = GestureRecordState.Recording
+            awaitRecordResult()
+        }
+    }
+
+    /** 进设置页时补一次：VM 若在锁屏期间被重建，轮询协程会一起没掉 */
+    fun refreshGestureRecord() {
+        if (recordJob?.isActive == true) return
+        recordJob = viewModelScope.launch {
+            val result = wakeUnlockEngine.pollGestureRecord() ?: return@launch
+            if (result.status.isTerminal) {
+                consume(result)
+            } else if (result.status == GestureRecordStatus.RECORDING) {
+                _gestureRecordState.value = GestureRecordState.Recording
+                awaitRecordResult()
+            }
+        }
+    }
+
+    fun cancelGestureRecord() {
+        recordJob?.cancel()
+        recordJob = viewModelScope.launch {
+            wakeUnlockEngine.cancelGestureRecord()
+            // 远端取消后不会留下终态，界面直接收掉，别让用户以为按钮没反应
+            _gestureRecordState.value =
+                GestureRecordState.Failed(WakeUnlockEngine.WakeResult.RECORD_CANCELLED)
+        }
+    }
+
+    fun clearGestureRecordState() {
+        _gestureRecordState.value = null
+    }
+
+    fun clearGesture() {
+        viewModelScope.launch { unlockGestureStore.clear() }
+    }
+
+    private suspend fun awaitRecordResult() {
+        val deadline = SystemClock.elapsedRealtime() + RECORD_TIMEOUT_MS + RECORD_GRACE_MS
+        // 先轮询再判超时：锁屏期间进程可能被冻结，解冻后这一轮仍要能把结果取回来
+        while (true) {
+            delay(RECORD_POLL_INTERVAL_MS.milliseconds)
+            val result = wakeUnlockEngine.pollGestureRecord()
+            // IDLE：oneway 的 start 还没落地，或远端重启过，继续等而不是当成已结束
+            if (result != null && result.status.isTerminal) {
+                consume(result)
+                return
+            }
+            if (SystemClock.elapsedRealtime() >= deadline) break
+        }
+        _gestureRecordState.value =
+            GestureRecordState.Failed(WakeUnlockEngine.WakeResult.RECORD_TIMEOUT)
+    }
+
+    private suspend fun consume(result: GestureRecordResult) {
+        val gesture = result.gesture
+        _gestureRecordState.value = if (
+            result.status == GestureRecordStatus.DONE && gesture != null
+        ) {
+            unlockGestureStore.save(gesture)
+            GestureRecordState.Done(gesture.steps.size)
+        } else {
+            GestureRecordState.Failed(WakeUnlockEngine.WakeResult.fromCode(result.errorCode))
+        }
+    }
+
+    // ========== 运行时信息 ==========
+
+    /** 待打卡目标应用包名，供设置页展示「当前目标」用 */
+    val targetPackageName: String = FEISHU_PACKAGE_NAME
+
+    // ========== 更新日志 ==========
+
+    private val _showChangelog = MutableStateFlow(false)
+    val showChangelog: StateFlow<Boolean> = _showChangelog.asStateFlow()
+
+    /** 当前版本留档的更新日志；版本号对不上（如旁路装了新版）一律视为没有 */
+    val currentChangelog: StateFlow<ChangelogArchive?> = combine(
+        appSettingsManager.currentChangelogVersion,
+        appSettingsManager.currentChangelogContent,
+    ) { version, content ->
+        if (version == BuildConfig.VERSION_NAME && content.isNotBlank()) {
+            ChangelogArchive(version = version, markdown = content)
+        } else {
+            null
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun onShowChangelog() {
+        _showChangelog.value = true
+    }
+
+    fun onDismissChangelog() {
+        _showChangelog.value = false
+    }
+
+    private companion object {
+        /** 与提权进程的录制超时对齐，留一段宽限防止两边同时判超时 */
+        const val RECORD_TIMEOUT_MS = 90_000
+        const val RECORD_GRACE_MS = 15_000
+        const val RECORD_POLL_INTERVAL_MS = 1_000L
+    }
+}

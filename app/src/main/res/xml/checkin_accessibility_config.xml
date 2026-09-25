@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  打卡无障碍服务配置。
+
+  关键配置项说明：
+  - canRetrieveWindowContent：必须为 true，否则读不到控件树，
+    整个打卡能力就失效了。
+  - canPerformGestures：允许执行手势点击，用于控件自身不可点击时
+    回退到坐标点击。
+  - canTakeScreenshot：允许截屏，供图像模板匹配兜底使用。
+    注意：对开启防截屏（FLAG_SECURE）的应用（如飞书）调用会失败，
+    这是系统安全限制，无法绕过。
+  - accessibilityFlags：flagRetrieveInteractiveWindows 用于支持
+    多窗口/悬浮窗场景下的控件读取。
+  - packageNames：刻意留空（不限制），因为需要读取飞书界面；
+    若填了包名白名单，切到其他应用时会收不到事件。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewFocused"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="200"
+    android:settingsActivity="com.aliothmoon.maameow.MainActivity"
+    android:summary="@string/accessibility_service_summary" />
