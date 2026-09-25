@@ -74,6 +74,50 @@ def should_skip(rel: Path) -> bool:
     return rel.suffix.lower() in SKIP_SUFFIXES
 
 
+# ── 需要强制 LF 行尾的扩展名 ──
+#
+# **这一步不能省。** 本脚本用 base64 把文件原始字节直接传给 Git Data API，
+# 因此 .gitattributes 里的 `text=auto eol=lf` 归一规则**不会生效** ——
+# 那条规则只在 git 自行处理工作区文件时才起作用。
+#
+# 后果很严重：Windows 上开发的 shell 脚本带 CRLF，传到 Linux CI 后
+# shebang 变成 `#!/usr/bin/env sh\r`，报
+#     /usr/bin/env: 'sh\r': No such file or directory
+# 退出码 127（command not found），日志里看不到任何 Gradle 输出，
+# 极难定位到「是行尾问题」。
+#
+# 因此这里主动做一次归一，与 .gitattributes 形成双保险。
+LF_REQUIRED = {
+    ".sh", ".bash", ".kt", ".kts", ".gradle", ".java", ".py",
+    ".properties", ".toml", ".yml", ".yaml", ".xml", ".json",
+    ".pro", ".md", ".txt", ".aidl",
+}
+# 无扩展名但必须是 LF 的文件（很重要：gradlew 就在这里）
+LF_FORCED_NAMES = {"gradlew", ".gitattributes", ".gitignore", ".editorconfig"}
+
+# 明确为二进制的文件：绝不能做行尾转换，否则会损坏内容
+#
+# keystore 尤其关键 —— 被当成文本处理会让密钥文件失效，
+# 而且报错信息不会指向「行尾转换」，排查成本极高。
+BINARY_SUFFIXES = {
+    ".jar", ".jks", ".keystore", ".apk", ".png", ".jpg", ".jpeg",
+    ".webp", ".gif", ".ttf", ".otf", ".so", ".dex", ".zip",
+}
+
+
+def normalize(rel: Path, data: bytes) -> bytes:
+    """按文件类型决定是否把行尾归一为 LF"""
+    if rel.suffix.lower() in BINARY_SUFFIXES:
+        return data
+    needs_lf = rel.suffix.lower() in LF_REQUIRED or rel.name in LF_FORCED_NAMES
+    if not needs_lf:
+        return data
+    # 只处理确实是 CRLF / 孤立 CR 的情况，避免对纯 LF 文件做无谓拷贝
+    if b"\r" not in data:
+        return data
+    return data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
+
 def collect() -> list[Path]:
     out = []
     for p in ROOT.rglob("*"):
@@ -171,8 +215,11 @@ def main() -> int:
     # ── 3. 上传 blob ──
     print(f"\n上传 {len(local)} 个 blob ...")
     tree_items = []
+    converted = []
     for i, rel in enumerate(local, 1):
-        content = (ROOT / rel).read_bytes()
+        content = normalize(rel, (ROOT / rel).read_bytes())
+        if content != (ROOT / rel).read_bytes():
+            converted.append(rel.as_posix())
         status, blob = request(
             "POST", f"{API}/git/blobs", token,
             {"content": base64.b64encode(content).decode(), "encoding": "base64"},
@@ -189,6 +236,13 @@ def main() -> int:
         })
         if i % 25 == 0:
             print(f"  [{i}/{len(local)}]")
+
+    if converted:
+        print(f"  已归一为 LF 行尾: {len(converted)} 个文件")
+        for p in converted[:8]:
+            print(f"    ~ {p}")
+        if len(converted) > 8:
+            print(f"    ...另有 {len(converted) - 8} 个")
 
     # ── 4. 构造完整树（不带 base_tree = 以本地为准，多余文件自然消失）──
     print("构造完整目录树 ...")

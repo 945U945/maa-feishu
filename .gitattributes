@@ -1,0 +1,72 @@
+# ══════════════════════════════════════════════════════════════
+#  行尾规范
+# ══════════════════════════════════════════════════════════════
+#
+# 为什么这个文件是必需的（不是可选的整洁性配置）
+#
+# 本工程在 Windows 上开发，`gradlew` / `gradlew.bat` 是从别处复制来的。
+# Git for Windows 默认的 `core.autocrlf` 会把 shell 脚本的行尾转成 CRLF，
+# 于是 shebang 那一行在文件里变成：
+#
+#     #!/usr/bin/env sh\r
+#
+# Linux（CI）解析 shebang 时，解释器名就成了 `sh\r`，报：
+#
+#     /usr/bin/env: 'sh\r': No such file or directory
+#     Process completed with exit code 127
+#
+# 注意 exit code 127 是「command not found」，**不是脚本本身的报错**，
+# 所以日志里看不到任何 Gradle 输出 —— 极易误判成「Gradle 没装上」
+# 或「gradlew 权限不够」，从而在错误的方向上折腾很久。
+#
+# 对策：用 .gitattributes 在仓库层面强制 shell 脚本用 LF，
+# 这样无论提交者的本地 autocrlf 怎么设置，进仓库的都是 LF。
+#
+# 顺带一提：GBK/UTF-8 BOM 也会造成类似的「shebang 解析不了」问题，
+# 所以下面也明确了文本文件的编码不做 BOM 转换。
+
+# ── 默认：交给 Git 自动判断，仓库内统一为 LF ──
+* text=auto eol=lf
+
+# ── shell 脚本必须 LF，否则 shebang 挂掉（见上方说明）──
+*.sh        text eol=lf
+gradlew     text eol=lf
+gradlew.bat text eol=crlf
+
+# ── 构建脚本与配置：LF，且必须进行 diff 归一 ──
+*.kts       text eol=lf
+*.gradle    text eol=lf
+*.properties text eol=lf
+*.toml      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.xml       text eol=lf
+*.json      text eol=lf
+*.pro       text eol=lf
+*.md        text eol=lf
+
+# ── 源码：LF ──
+*.kt        text eol=lf
+*.java      text eol=lf
+*.py        text eol=lf
+
+# ── 二进制：不要做任何转换 ──
+#
+# keystore 若被当成文本处理，行尾转换会**破坏密钥文件**，
+# 导致签名失败且报错难以理解。jar 同理。
+*.jar       binary
+*.jks       binary
+*.keystore  binary
+*.apk       binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.webp      binary
+*.ttf       binary
+*.otf       binary
+*.so        binary
+*.dex       binary
+
+# ── 语言统计：把生成的产物排除，避免污染仓库语言占比 ──
+gradlew.bat linguist-vendored
+gradle/wrapper/* linguist-vendored

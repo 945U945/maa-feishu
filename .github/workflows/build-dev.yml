@@ -85,15 +85,27 @@ jobs:
           # 那不是错误
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-          # 只在缺失时安装，避免每次构建都重装
+          # android-37 属于 **preview 频道**，稳定频道里查不到它。
+          # 不加 --channel 会得到：
+          #   Warning: Failed to find package 'platforms;android-37'
+          # 且因为 exit code 是 0（只是 warning），脚本不会失败，
+          # 直到编译阶段才报「Failed to find target hash string android-37」，
+          # 报错点与根因隔了好几步。
+          # channel 取值：0=stable 1=beta 2=dev 3=canary
           if [ -d "$ANDROID_SDK_ROOT/platforms/android-37" ]; then
             echo "android-37 已存在，跳过安装"
           else
-            echo "安装 platforms;android-37 ..."
-            sdkmanager --install "platforms;android-37" 2>&1 | tail -5
+            echo "安装 platforms;android-37（canary 频道）..."
+            sdkmanager --channel=3 --install "platforms;android-37" 2>&1 | tail -3 || \
+              sdkmanager --install "platforms;android-37" 2>&1 | tail -3
           fi
 
           echo "最终 platforms:"; ls "$ANDROID_SDK_ROOT/platforms"
+
+          if [ ! -d "$ANDROID_SDK_ROOT/platforms/android-37" ]; then
+            echo "::error::android-37 安装失败，后续编译必然报 target not found"
+            exit 1
+          fi
 
       - name: Cache Gradle
         uses: actions/cache@v4
