@@ -113,9 +113,17 @@ android {
             }
         }
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(*minifyProguardFiles.toTypedArray())
+            // 排障开关：MAA_NO_R8=true 时产出「不混淆的 Release 包」。
+            // 用途：怀疑崩溃是 R8 裁剪/改名引起时，用它做 A/B 对照 ——
+            // 关掉 R8 能跑、开着 R8 闪退，即可锁定为混淆问题。
+            val noR8 = System.getenv("MAA_NO_R8")?.toBoolean() == true
+            isMinifyEnabled = !noR8
+            isShrinkResources = !noR8
+            if (noR8) {
+                println("[R8] MAA_NO_R8=true —— release 关闭 minify/shrink（排障用）")
+            } else {
+                proguardFiles(*minifyProguardFiles.toTypedArray())
+            }
             val keystorePath = System.getenv("KEYSTORE_PATH")
                 ?: localProperties.getProperty("KEYSTORE_PATH", "")
             if (keystorePath.isNotEmpty()) {

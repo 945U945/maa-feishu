@@ -90,3 +90,96 @@
     public static **[] values();
     public static ** valueOf(java.lang.String);
 }
+
+# ══════════════════════════════════════════════════════════════
+#  打卡版新增：Koin / Compose / 反射相关的保留规则
+#
+#  注意：下面这批是原游戏版 proguard 规则的补漏。Koin 通过「类型 token」
+#  在运行期解析依赖，R8 若把类型改名或把 ViewModel 的无参构造删掉，
+#  表现就是「编译通过、启动即闪退」——极难定位，必须显式 keep。
+# ══════════════════════════════════════════════════════════════
+
+# ── Koin ──
+# Koin 的 module DSL 会生成引用各实现类构造的 lambda，R8 可能判定为死代码。
+-keep class org.koin.** { *; }
+-dontwarn org.koin.**
+# KoinComponent 的 by inject() 依赖运行期解析
+-keepclassmembers class * implements org.koin.core.component.KoinComponent {
+    <fields>;
+    <methods>;
+}
+# @KoinViewModel 等注解保留（Koin 靠注解扫描）
+-keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations
+-keep,allowobfuscation @interface org.koin.core.annotation.*
+
+# ── 所有 ViewModel：Koin 按类型取，且 ViewModelProvider 需要公开构造 ──
+-keep class * extends androidx.lifecycle.ViewModel {
+    <init>(...);
+}
+-keepclassmembers class * extends androidx.lifecycle.ViewModel {
+    <init>(...);
+}
+
+# ── Application / Activity / Service / Receiver / Provider ──
+# 这些是 manifest 注册的组件，名字不能改（改了系统找不到）
+-keep public class * extends android.app.Application
+-keep public class * extends android.app.Activity
+-keep public class * extends android.app.Service
+-keep public class * extends android.content.BroadcastReceiver
+-keep public class * extends android.content.ContentProvider
+-keep public class * extends android.accessibilityservice.AccessibilityService
+-keep public class * extends android.app.backup.BackupAgentHelper
+-keep public class * extends android.preference.Preference
+
+# ── 本工程自有类：注册的组件与入口一律保留原名 ──
+# 打卡版大量使用 Koin 按类型解析 + 无障碍服务按类名拉起，
+# 一旦被改名，系统或 Koin 都会找不到。
+-keep class com.aliothmoon.maameow.MaaApplication { *; }
+-keep class com.aliothmoon.maameow.MainActivity { *; }
+-keep class com.aliothmoon.maameow.service.** { *; }
+-keep class com.aliothmoon.maameow.schedule.receiver.** { *; }
+-keep class com.aliothmoon.maameow.utils.AppBootTrace { *; }
+-keep class com.aliothmoon.maameow.utils.CrashHandler { *; }
+
+# ── Compose ──
+# Compose 的 @Composable 由编译器插件改写，R8 过度优化会破坏调用约定
+-dontwarn androidx.compose.**
+-keep class androidx.compose.runtime.** { *; }
+-keepclassmembers class ** {
+    @androidx.compose.runtime.Composable <methods>;
+}
+# Compose 的 SnapshotState 反射访问
+-keepclassmembers class androidx.compose.runtime.snapshots.SnapshotStateList { *; }
+-keepclassmembers class androidx.compose.runtime.snapshots.SnapshotStateMap { *; }
+
+# ── androidx.lifecycle / 序列化 ──
+-keep class androidx.lifecycle.** { *; }
+-keep class kotlinx.serialization.** { *; }
+-keepclassmembers class kotlinx.serialization.json.** {
+    *** Companion;
+}
+-keepclasseswithmembers class kotlinx.serialization.json.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keep,includedescriptorclasses class com.aliothmoon.maameow.**$$serializer { *; }
+-keepclassmembers class com.aliothmoon.maameow.** {
+    *** Companion;
+}
+
+# ── Timber ──
+-keep class timber.log.** { *; }
+-dontwarn timber.log.**
+
+# ── Kotlin 元数据（反射读 Kotlin 类型信息时需要）──
+-keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations,AnnotationDefault
+-keep class kotlin.Metadata { *; }
+-keep class kotlin.reflect.** { *; }
+-dontwarn kotlin.reflect.**
+
+# ── OkHttp / Retrofit 类库常见的反射点 ──
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn retrofit2.**
+-keep class okhttp3.** { *; }
+-keep class okio.** { *; }
+

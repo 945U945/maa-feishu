@@ -10,6 +10,7 @@ import com.aliothmoon.maameow.koin.viewModelModule
 import com.aliothmoon.maameow.overlay.OverlayController
 import com.aliothmoon.maameow.schedule.data.ScheduleStrategyRepository
 import com.aliothmoon.maameow.schedule.service.ScheduleAlarmManager
+import com.aliothmoon.maameow.utils.AppBootTrace
 import com.aliothmoon.maameow.utils.CrashHandler
 import com.aliothmoon.maameow.utils.i18n.LocaleBootstrap
 import com.aliothmoon.maameow.utils.log.LogTreeHolder
@@ -57,22 +58,51 @@ class MaaApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         val app = this
+
+        // ── 埋点与崩溃捕获必须最先就位 ──
+        //
+        // 之前 crashHandler.init() 排在 treeHolder.setup() 之后，
+        // 结果 setup() 里的异常（Koin 解析失败等）发生时崩溃处理器尚未安装，
+        // 堆栈既进不了 logcat 也落不了盘，表现为「闪退且无任何日志」。
+        // 现在改为：先用最原始的 appender 兜底记录启动，再装崩溃处理器，
+        // 最后才做依赖装配。
+        AppBootTrace.step("onCreate begin")
+        AppBootTrace.installFileAppender(app)
+
         startKoin {
             androidLogger(if (BuildConfig.DEBUG) Level.DEBUG else Level.NONE)
             androidContext(app)
             modules(appModule, useCaseModule, viewModelModule)
         }
-        // 不等设置读盘，冷启动 receiver / FGS 的日志与崩溃才接得住
-        treeHolder.setup()
-        crashHandler.init(this)
+        AppBootTrace.step("startKoin done")
+
+        // 崩溃处理器：先于任何可能抛异常的依赖解析
+        runCatching { crashHandler }.onFailure {
+            AppBootTrace.fail("crashHandler 注入失败", it)
+        }
+        runCatching { crashHandler.init(this) }.onFailure {
+            AppBootTrace.fail("crashHandler.init 失败", it)
+        }
+        AppBootTrace.step("crashHandler ready")
+
+        // 日志树依赖 AppPathConfig / AppSettingsManager，放最后解析
+        runCatching { treeHolder.setup() }.onFailure {
+            AppBootTrace.fail("treeHolder.setup 失败（Koin 依赖链可能断裂）", it)
+        }
+        AppBootTrace.step("treeHolder ready")
 
         applicationScope.launch(Dispatchers.Main) {
-            appSettingsManager.awaitLoaded()
-            LocaleBootstrap.applyPersisted(appSettingsManager)
-            postCreateApplication()
-            initialization.complete(Unit)
-        }.invokeOnCompletion { cause ->
-            if (cause != null) initialization.completeExceptionally(cause)
+            try {
+                appSettingsManager.awaitLoaded()
+                AppBootTrace.step("settings loaded")
+                LocaleBootstrap.applyPersisted(appSettingsManager)
+                postCreateApplication()
+                AppBootTrace.step("postCreateApplication done")
+                initialization.complete(Unit)
+            } catch (t: Throwable) {
+                AppBootTrace.fail("异步初始化失败", t)
+                initialization.completeExceptionally(t)
+            }
         }
     }
 

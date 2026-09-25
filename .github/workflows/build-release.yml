@@ -6,6 +6,15 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      no_r8:
+        description: '关闭 R8 混淆(排障用：产出不混淆的 release 包)'
+        type: boolean
+        default: false
+      abi:
+        description: '只构建指定 ABI(留空=全部)。排障时可填 arm64-v8a 提速'
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -86,14 +95,18 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          # 手动触发时若勾选「关闭 R8」则不混淆，用于判断崩溃是否由 R8 引起
+          MAA_NO_R8: ${{ inputs.no_r8 }}
         run: |
           ./gradlew clean assembleRelease -Pmaa.abi=${{ matrix.abi }} --stacktrace
 
       - name: Collect APK
         run: |
           mkdir -p dist
+          suffix=""
+          if [ "${{ inputs.no_r8 }}" = "true" ]; then suffix="-nor8"; fi
           for f in app/build/outputs/apk/release/*.apk; do
-            cp "$f" "dist/FeishuCheckIn-${{ matrix.label }}.apk"
+            cp "$f" "dist/FeishuCheckIn-${{ matrix.label }}${suffix}.apk"
           done
           ls -lh dist
 
