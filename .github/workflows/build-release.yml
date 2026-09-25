@@ -58,19 +58,20 @@ jobs:
       # 未配置 KEYSTORE_BASE64 时跳过，构建会降级为未签名包（不可直接安装）。
       # 注意：GitHub Actions 的 if 条件里不能直接引用 secrets.*，只能经 env 中转。
       #
-      # 路径必须落在 app 模块内：build.gradle.kts 用的是 file(keystorePath)，
-      # 而 file() 在 app 模块作用域下以 app/ 为基准，写根目录会报
-      # "Keystore file '.../app/release.jks' not found"。
+      # 落点固定为仓库根的 release.jks —— app/build.gradle.kts 里用
+      # rootProject.file(KEYSTORE_PATH) 解析，两边基准必须一致。
       - name: Restore keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PATH: ${{ secrets.KEYSTORE_PATH }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
             echo "未配置 KEYSTORE_BASE64，跳过还原，release 将产出未签名包"
             exit 0
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > app/release.jks
-          echo "已还原签名文件到 app/release.jks"
+          echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+          ls -la "$KEYSTORE_PATH"
+          echo "已还原签名文件到 $KEYSTORE_PATH"
 
       - name: Static self-check
         run: |
