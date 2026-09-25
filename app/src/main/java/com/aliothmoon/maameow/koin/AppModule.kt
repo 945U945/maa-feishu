@@ -67,7 +67,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import org.koin.android.ext.koin.androidApplication
 import org.koin.android.ext.koin.androidContext
-import org.koin.core.module.dsl.bind
 import org.koin.core.module.dsl.singleOf
 import org.koin.core.qualifier.named
 import org.koin.dsl.module
@@ -100,7 +99,9 @@ val appModule = module {
     singleOf(::MainTabNavigator)
 
     single { AppSettingsManager(androidContext(), get()) }
-    single { UnlockGestureStore(get()) } bind UnlockGestureReader::class
+    // 显式声明接口类型，不用 `bind` 扩展 —— 后者对 lambda 返回值的类型推断
+    // 在 Kotlin 2.x + Koin 4.2 组合下不稳定，会报 receiver type mismatch。
+    single<UnlockGestureReader> { UnlockGestureStore(get()) }
 
     // ── 打卡核心（新增） ──
     single { CheckInRepository(androidContext()) }
@@ -174,17 +175,17 @@ val appModule = module {
 
     // ── 外部通知（保留，可用于推送打卡结果；CustomWebhook 同时支持飞书机器人） ──
     singleOf(::NotificationSettingsManager)
-    single { ServerChanProvider(get(), get()) } bind NotificationProvider::class
-    single { TelegramProvider(get(), get()) } bind NotificationProvider::class
-    single { DiscordProvider(get(), get()) } bind NotificationProvider::class
-    single { DingTalkProvider(get(), get()) } bind NotificationProvider::class
-    single { KookProvider(get(), get()) } bind NotificationProvider::class
-    single { DiscordWebhookProvider(get(), get()) } bind NotificationProvider::class
-    single { SmtpProvider(get()) } bind NotificationProvider::class
-    single { BarkProvider(get(), get()) } bind NotificationProvider::class
-    single { QmsgProvider(get(), get()) } bind NotificationProvider::class
-    single { GotifyProvider(get(), get()) } bind NotificationProvider::class
-    single { CustomWebhookProvider(get(), get()) } bind NotificationProvider::class
+    single<NotificationProvider> { ServerChanProvider(get(), get()) }
+    single<NotificationProvider> { TelegramProvider(get(), get()) }
+    single<NotificationProvider> { DiscordProvider(get(), get()) }
+    single<NotificationProvider> { DingTalkProvider(get(), get()) }
+    single<NotificationProvider> { KookProvider(get(), get()) }
+    single<NotificationProvider> { DiscordWebhookProvider(get(), get()) }
+    single<NotificationProvider> { SmtpProvider(get()) }
+    single<NotificationProvider> { BarkProvider(get(), get()) }
+    single<NotificationProvider> { QmsgProvider(get(), get()) }
+    single<NotificationProvider> { GotifyProvider(get(), get()) }
+    single<NotificationProvider> { CustomWebhookProvider(get(), get()) }
     single { ExternalNotificationService(get(), get(), getAll()) }
 
     // 通知 / 实况
@@ -205,7 +206,7 @@ val appModule = module {
 
     // 悬浮窗
     singleOf(::BorderOverlayManager)
-    singleOf(::ScreenSaverOverlayManager) { bind<ScreenSaverController>() }
+    single<ScreenSaverController> { ScreenSaverOverlayManager(get()) }
     singleOf(::OverlayViewModelOwner)
     singleOf(::OverlayController)
 
