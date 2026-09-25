@@ -80,10 +80,13 @@ android {
 
     signingConfigs {
         create("release") {
+            // KEYSTORE_PATH 统一按「仓库根相对路径」理解（如 release.jks）。
+            // 这里必须用 rootProject.file()：直接用 file() 会以 app 模块为基准，
+            // 传 "release.jks" 会被解析成 app/release.jks，两个基准混用极易踩坑。
             val keystorePath = System.getenv("KEYSTORE_PATH")
                 ?: localProperties.getProperty("KEYSTORE_PATH", "")
             if (keystorePath.isNotEmpty()) {
-                storeFile = file(keystorePath)
+                storeFile = rootProject.file(keystorePath)
                 storePassword = System.getenv("KEYSTORE_PASSWORD")
                     ?: localProperties.getProperty("KEYSTORE_PASSWORD", "")
                 keyAlias = System.getenv("KEY_ALIAS")
