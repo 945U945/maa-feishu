@@ -92,21 +92,30 @@ jobs:
           set -e
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-          # android-37 在 preview 频道（channel=3 为 canary）。
-          # 不加 --channel 只会得到 warning 而非错误，直到编译阶段
-          # 才报 target not found，报错点与根因隔了好几步。
-          if [ -d "$ANDROID_SDK_ROOT/platforms/android-37" ]; then
-            echo "android-37 已存在，跳过安装"
+          # ── SDK 目录名是 android-37.0，不是 android-37 ──
+          # API 36 之后 Google 把 platform 目录改为带小版本号，
+          # `sdkmanager --install platforms;android-37` 装出来的是
+          # `android-37.0`。若按 `-d .../android-37` 判断，会永远
+          # 判定「未安装」并在最后误报「安装失败」。
+          # 因此统一用通配 android-37* 判断。
+          has_37() { ls -d "$ANDROID_SDK_ROOT"/platforms/android-37* >/dev/null 2>&1; }
+
+          if has_37; then
+            echo "已存在 API 37 平台，跳过安装:"
+            ls -d "$ANDROID_SDK_ROOT"/platforms/android-37*
           else
             echo "安装 platforms;android-37（canary 频道）..."
-            sdkmanager --channel=3 --install "platforms;android-37" 2>&1 | tail -3 || \
-              sdkmanager --install "platforms;android-37" 2>&1 | tail -3
+            sdkmanager --channel=3 --install "platforms;android-37" 2>&1 | tail -5 || true
+            if ! has_37; then
+              echo "canary 频道失败，退回 stable 频道重试..."
+              sdkmanager --install "platforms;android-37" 2>&1 | tail -5 || true
+            fi
           fi
 
           echo "最终 platforms:"; ls "$ANDROID_SDK_ROOT/platforms"
 
-          if [ ! -d "$ANDROID_SDK_ROOT/platforms/android-37" ]; then
-            echo "::error::android-37 安装失败，后续编译必然报 target not found"
+          if ! has_37; then
+            echo "::error::未找到任何 API 37 平台，后续编译必然报 target not found"
             exit 1
           fi
 

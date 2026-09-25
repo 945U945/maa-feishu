@@ -85,25 +85,40 @@ jobs:
           # 那不是错误
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
 
-          # android-37 属于 **preview 频道**，稳定频道里查不到它。
-          # 不加 --channel 会得到：
-          #   Warning: Failed to find package 'platforms;android-37'
-          # 且因为 exit code 是 0（只是 warning），脚本不会失败，
-          # 直到编译阶段才报「Failed to find target hash string android-37」，
-          # 报错点与根因隔了好几步。
-          # channel 取值：0=stable 1=beta 2=dev 3=canary
-          if [ -d "$ANDROID_SDK_ROOT/platforms/android-37" ]; then
-            echo "android-37 已存在，跳过安装"
+          # ── 关键：SDK 目录名**不是** `android-37`，而是带小版本号的 ──
+          #
+          # Google 从 API 36 之后把 platform 目录改名为
+          #   android-37.0 / android-37.1 / android-37.2 ...
+          # 而 sdkmanager 的包名 `platforms;android-37` 装出来的
+          # 就是 `android-37.0`，**绝不会**生成名为 `android-37` 的目录。
+          #
+          # 之前写死判断 `-d .../android-37` 导致：
+          #   1. 永远判定为「不存在」→ 每次都尝试安装
+          #   2. 装完仍是 android-37.0 → 最后那句 exit 1 必定触发
+          #   3. 报错信息说「android-37 安装失败」，但实际早就装好了
+          # 这是一个「检查条件与真实约定不符」的典型误诊点。
+          #
+          # 因此改用**通配匹配** android-37*，只看有没有可用的 37 平台。
+          has_37() { ls -d "$ANDROID_SDK_ROOT"/platforms/android-37* >/dev/null 2>&1; }
+
+          if has_37; then
+            echo "已存在 API 37 平台，跳过安装:"
+            ls -d "$ANDROID_SDK_ROOT"/platforms/android-37*
           else
             echo "安装 platforms;android-37（canary 频道）..."
-            sdkmanager --channel=3 --install "platforms;android-37" 2>&1 | tail -3 || \
-              sdkmanager --install "platforms;android-37" 2>&1 | tail -3
+            # channel 取值：0=stable 1=beta 2=dev 3=canary
+            # android-37 在 stable 频道查不到，需要 canary
+            sdkmanager --channel=3 --install "platforms;android-37" 2>&1 | tail -5 || true
+            if ! has_37; then
+              echo "canary 频道失败，退回 stable 频道重试..."
+              sdkmanager --install "platforms;android-37" 2>&1 | tail -5 || true
+            fi
           fi
 
           echo "最终 platforms:"; ls "$ANDROID_SDK_ROOT/platforms"
 
-          if [ ! -d "$ANDROID_SDK_ROOT/platforms/android-37" ]; then
-            echo "::error::android-37 安装失败，后续编译必然报 target not found"
+          if ! has_37; then
+            echo "::error::未找到任何 API 37 平台，后续编译必然报 target not found"
             exit 1
           fi
 
