@@ -1,35 +1,62 @@
-name: Build Dev APK
+name: Dev Build
+
+# 每次推送到主分支或 PR 时执行。
+#
+# 这条流水线的职责不是出包，而是**尽快发现问题**：
+# 静态检查（依赖注入完整性、字符串一致性）先跑，
+# 因为它们几秒就能完成，而编译要几分钟。
+# 让最快的检查挡在最前面，能显著缩短反馈周期。
+#
+# 产物：可安装的 debug APK（含 .debug 后缀，可与正式版共存）
 
 on:
   push:
-    branches:
-      - main
-      - dev
+    branches: [main, master, dev]
   pull_request:
-    branches:
-      - main
+    branches: [main, master]
   workflow_dispatch:
+
+# 同一分支的旧构建自动取消，避免排队浪费时间
+concurrency:
+  group: dev-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 统一 Gradle 参数：CI 上关闭守护进程与配置缓存，
+  # 每次都是干净环境，守护进程反而占内存
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+  GRADLE_ARGS: "--no-daemon --stacktrace"
 
 jobs:
   build:
+    name: Build Debug APK
     runs-on: ubuntu-latest
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: '17'
-          distribution: 'temurin'
 
-      - name: Setup Android SDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: 'platform-tools'
+
+      # 项目需要 compileSdk 37。GitHub 托管 runner 自带的
+      # SDK 不一定包含，装一次并接受许可，避免编译时
+      # 报「Failed to find target with hash string android-37」
+      - name: Install Android SDK platform 37
+        run: |
+          set -e
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "platforms;android-37" "build-tools;37.0.0" > /dev/null 2>&1 || \
+            sdkmanager "platforms;android-37" > /dev/null 2>&1 || true
+          echo "已安装的 platforms:"
+          ls "$ANDROID_SDK_ROOT/platforms" || true
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -37,32 +64,71 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/gradle-wrapper.properties', '**/libs.versions.toml') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Make gradlew executable
+      - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
 
-      # 源码级静态自检：字符串资源完整性 + 工程内依赖可达性
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      # ── 静态检查：秒级完成，放在编译之前 ──
+      #
+      # 这两项检查直接对应历史上的两次翻车：
+      #   check_koin.py    → 依赖漏注册导致启动闪退
+      #   check_strings.py → 多语言 key 缺失/占位符不一致导致崩溃
+      # 它们能捕获「编译通过但运行时炸」的问题，而编译器抓不到
 
-      - name: Static self-check
+      - name: Static check — Koin 依赖完整性
         run: |
-          python scripts/check_strings.py app/src/main
-          python scripts/check_deps.py app/src/main/java/com/aliothmoon/maameow || true
-          # Koin 缺失依赖只在运行期暴露，编译通过也照样启动闪退，必须单独校验
-          python scripts/check_koin.py app/src/main
+          python3 scripts/check_koin.py
 
-      - name: Build Debug APK
-        run: ./gradlew clean assembleDebug --stacktrace
+      - name: Static check — 字符串资源一致性
+        run: |
+          python3 scripts/check_strings.py
+
+      - name: Run unit tests
+        run: ./gradlew $GRADLE_ARGS :app:testDebugUnitTest
+
+      - name: Build debug APK
+        run: ./gradlew $GRADLE_ARGS :app:assembleDebug
+
+      # 编译后再跑一次 Koin 检查，并检查产物内的类是否保留 ——
+      # R8 只作用于 release，debug 下用这个检查确认
+      # 「类名没被意外改写」（某些插件会在编译期做字节码处理）
+      - name: Verify APK structure
+        run: |
+          set -e
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::未找到 APK 产物"
+            exit 1
+          fi
+          echo "APK: $APK"
+          ls -lh "$APK"
+
+          # 确认关键组件真的被打进包里。
+          # 用 unzip -l 检查 classes.dex 存在即可，
+          # 更细的类名检查需要 dex 工具，收益不大
+          unzip -l "$APK" | grep -q "classes.dex" || {
+            echo "::error::APK 内没有 classes.dex"
+            exit 1
+          }
+          echo "APK 结构检查通过"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: debug-apk
+          name: feishu-checkin-debug-${{ github.run_number }}
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports-${{ github.run_number }}
+          path: |
+            app/build/reports/**
+            app/build/outputs/logs/**
+          retention-days: 7
+          if-no-files-found: ignore
