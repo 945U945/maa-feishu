@@ -1,11 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-
-    <style name="Theme.MaaMeow.Starting" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
-        <item name="postSplashScreenTheme">@style/Theme.MaaMeow</item>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- 基础主题：Compose 负责实际外观，这里只管窗口与状态栏 -->
+    <style name="Theme.FeishuCheckIn" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">true</item>
+        <item name="android:windowBackground">@color/window_background</item>
     </style>
 
-    <style name="Theme.MaaMeow" parent="Theme.AppCompat.DayNight.NoActionBar" />
+    <!-- 启动主题：仅用于冷启动期间，避免白屏闪烁 -->
+    <style name="Theme.FeishuCheckIn.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <!-- 必须写 @drawable/ 而不是 @mipmap/：
+             前景图放在 drawable/ic_launcher_foreground.xml（矢量图），
+             写成 @mipmap/ 会找不到资源，AAPT2 直接报
+             "resource mipmap/ic_launcher_foreground not found" -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.FeishuCheckIn</item>
+    </style>
 </resources>
